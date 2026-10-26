@@ -5,6 +5,7 @@ import { ScheduleModule } from "@nestjs/schedule";
 import { LoggerModule } from "nestjs-pino";
 import { randomUUID } from "node:crypto";
 import { AwsModule } from "./common/aws/aws.module";
+import { MensageriaModule } from "./modules/mensageria/mensageria.module";
 import { HealthModule } from "./modules/health/health.module";
 
 @Module({
@@ -26,6 +27,7 @@ import { HealthModule } from "./modules/health/health.module";
 		JwtModule.register({ global: true, secret: process.env.JWT_SECRET }),
 		ScheduleModule.forRoot(),
 		AwsModule,
+		MensageriaModule,
 		HealthModule,
 	],
 })
