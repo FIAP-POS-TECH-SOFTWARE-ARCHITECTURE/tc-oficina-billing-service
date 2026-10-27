@@ -2,8 +2,6 @@ node_modules
 dist
 coverage
 .git
-.claude
-.superpowers
 bruno
 dev
 test
