@@ -6,6 +6,7 @@ import { LoggerModule } from "nestjs-pino";
 import { randomUUID } from "node:crypto";
 import { AwsModule } from "./common/aws/aws.module";
 import { MensageriaModule } from "./modules/mensageria/mensageria.module";
+import { OrcamentosModule } from "./modules/orcamentos/orcamentos.module";
 import { HealthModule } from "./modules/health/health.module";
 
 @Module({
@@ -28,6 +29,7 @@ import { HealthModule } from "./modules/health/health.module";
 		ScheduleModule.forRoot(),
 		AwsModule,
 		MensageriaModule,
+		OrcamentosModule,
 		HealthModule,
 	],
 })
