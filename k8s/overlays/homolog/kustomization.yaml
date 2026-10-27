@@ -1,0 +1,17 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: homolog
+resources:
+  - ../../base
+# A pipeline (cd.yml) substitui os dois placeholders pelo repositório do ECR e pela
+# tag do build (env-sha) antes do `kubectl apply -k`.
+images:
+  - name: billing-service
+    newName: ci-placeholder-image
+    newTag: ci-placeholder-tag
+patches:
+  - patch: |-
+      - op: add
+        path: /spec/template/spec/containers/0/env/-
+        value: { name: NEW_RELIC_APP_NAME, value: oficina-billing-service-homolog }
+    target: { kind: Deployment, name: billing-service }
