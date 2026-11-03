@@ -346,12 +346,21 @@ describe("OrcamentosDynamoDbGateway", () => {
 	});
 
 	describe("outbox", () => {
+		it("grava o trace informado no item EVENTO# (sem trace, mapa vazio)", async () => {
+			ddbMock.on(TransactWriteCommand).resolves({});
+			await gateway.registrarEfeitos({ eventos: [evento], cabecalhosTrace: { traceparent: "00-a-b-01" } });
+			await gateway.registrarEfeitos({ eventos: [evento] });
+			const [com, sem] = ddbMock.commandCalls(TransactWriteCommand).map((c) => c.args[0].input.TransactItems?.[0]?.Put?.Item);
+			expect(com).toMatchObject({ pk: "EVENTO#" + evento.messageId, cabecalhosTrace: { traceparent: "00-a-b-01" } });
+			expect(sem).toMatchObject({ cabecalhosTrace: {} });
+		});
+
 		it("listarEventosPendentes consulta o índice esparso até o limite de tempo", async () => {
 			ddbMock.on(QueryCommand).resolves({ Items: [{ envelope: evento }] });
 
 			const pendentes = await gateway.listarEventosPendentes(new Date("2026-10-20T13:05:10Z"), 50);
 
-			expect(pendentes).toEqual([evento]);
+			expect(pendentes).toEqual([{ envelope: evento, cabecalhosTrace: {} }]);
 			expect(ddbMock.commandCalls(QueryCommand)[0].args[0].input).toEqual({
 				TableName: TABELA,
 				IndexName: "gsi1",
@@ -359,6 +368,12 @@ describe("OrcamentosDynamoDbGateway", () => {
 				ExpressionAttributeValues: { ":p": "EVENTO_PENDENTE", ":limite": "2026-10-20T13:05:10.000Z" },
 				Limit: 50,
 			});
+		});
+
+		it("listarEventosPendentes devolve o trace gravado no item do evento", async () => {
+			const cabecalhosTrace = { traceparent: "00-a-b-01" };
+			ddbMock.on(QueryCommand).resolves({ Items: [{ envelope: evento, cabecalhosTrace }] });
+			await expect(gateway.listarEventosPendentes(new Date(), 50)).resolves.toEqual([{ envelope: evento, cabecalhosTrace }]);
 		});
 
 		it("listarEventosPendentes sem itens devolve lista vazia", async () => {

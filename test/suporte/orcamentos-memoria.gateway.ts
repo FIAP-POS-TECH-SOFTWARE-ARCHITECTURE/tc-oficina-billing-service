@@ -1,9 +1,11 @@
 import type { EnvelopeMensagem } from "../../src/modules/mensageria/envelope";
+import type { CabecalhosTrace } from "../../src/modules/mensageria/trace";
 import type { PagamentoExterno } from "../../src/modules/orcamentos/application/ports/gateway-pagamento.port";
 import {
 	type CancelamentoAntecipado,
 	ConflitoConcorrenciaError,
 	type EfeitosGravacao,
+	type EventoPendente,
 	MensagemJaProcessadaError,
 	OrcamentoJaExisteError,
 	type OrcamentosGatewayPort,
@@ -16,7 +18,7 @@ export class OrcamentosMemoriaGateway implements OrcamentosGatewayPort {
 	readonly chaves = new Set<string>();
 	readonly cancelamentos = new Map<string, CancelamentoAntecipado>();
 	readonly pagamentos = new Map<string, PagamentoExterno>();
-	readonly eventos = new Map<string, { envelope: EnvelopeMensagem<unknown>; pendente: boolean }>();
+	readonly eventos = new Map<string, { envelope: EnvelopeMensagem<unknown>; cabecalhosTrace: CabecalhosTrace; pendente: boolean }>();
 
 	async buscarPorId(id: string) {
 		const d = this.orcamentos.get(id);
@@ -64,11 +66,11 @@ export class OrcamentosMemoriaGateway implements OrcamentosGatewayPort {
 		this.verificarDedupe(efeitos);
 		this.aplicar(efeitos);
 	}
-	async listarEventosPendentes(antesDe: Date, limite: number) {
+	async listarEventosPendentes(antesDe: Date, limite: number): Promise<EventoPendente[]> {
 		return [...this.eventos.values()]
 			.filter((e) => e.pendente && e.envelope.ocorridoEm < antesDe.toISOString())
 			.slice(0, limite)
-			.map((e) => e.envelope);
+			.map(({ envelope, cabecalhosTrace }) => ({ envelope, cabecalhosTrace }));
 	}
 	async marcarEventoPublicado(messageId: string) {
 		const e = this.eventos.get(messageId);
@@ -92,6 +94,7 @@ export class OrcamentosMemoriaGateway implements OrcamentosGatewayPort {
 		if (efeitos.mensagemProcessada) this.chaves.add(`MSG#${efeitos.mensagemProcessada}`);
 		if (efeitos.notificacaoProcessada) this.chaves.add(`WEBHOOK#${efeitos.notificacaoProcessada}`);
 		for (const p of efeitos.pagamentos ?? []) this.pagamentos.set(p.pagamentoId, p);
-		for (const e of efeitos.eventos) this.eventos.set(e.messageId, { envelope: e, pendente: true });
+		for (const e of efeitos.eventos)
+			this.eventos.set(e.messageId, { envelope: e, cabecalhosTrace: efeitos.cabecalhosTrace ?? {}, pendente: true });
 	}
 }

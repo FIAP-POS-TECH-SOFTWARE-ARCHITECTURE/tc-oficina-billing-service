@@ -1,11 +1,12 @@
 import { Inject, Injectable, Logger } from "@nestjs/common";
 import { mensagemDeErro } from "../../../../common/utils/erro.util";
-import type { EnvelopeMensagem } from "../../../mensageria/envelope";
 import { PUBLICADOR_MENSAGENS, type PublicadorMensagensPort } from "../../../mensageria/publicador-mensagens.port";
+import { type CabecalhosTrace, capturarCabecalhosTrace } from "../../../mensageria/trace";
 import type { Orcamento } from "../../domain/orcamento.entity";
 import {
 	type CancelamentoAntecipado,
 	type EfeitosGravacao,
+	type EventoPendente,
 	MensagemJaProcessadaError,
 	ORCAMENTOS_GATEWAY,
 	type OrcamentosGatewayPort,
@@ -25,25 +26,29 @@ export class EventosOrcamentoService {
 	) {}
 
 	criar(orcamento: Orcamento, efeitos: EfeitosGravacao): Promise<boolean> {
-		return this.gravar(() => this.gateway.criar(orcamento, efeitos), efeitos);
+		const comTrace = this.comTrace(efeitos);
+		return this.gravar(() => this.gateway.criar(orcamento, comTrace), comTrace);
 	}
 
 	atualizar(orcamento: Orcamento, versaoAnterior: number, efeitos: EfeitosGravacao): Promise<boolean> {
-		return this.gravar(() => this.gateway.atualizar(orcamento, versaoAnterior, efeitos), efeitos);
+		const comTrace = this.comTrace(efeitos);
+		return this.gravar(() => this.gateway.atualizar(orcamento, versaoAnterior, comTrace), comTrace);
 	}
 
 	registrarCancelamentoAntecipado(cancelamento: CancelamentoAntecipado, efeitos: EfeitosGravacao): Promise<boolean> {
-		return this.gravar(() => this.gateway.registrarCancelamentoAntecipado(cancelamento, efeitos), efeitos);
+		const comTrace = this.comTrace(efeitos);
+		return this.gravar(() => this.gateway.registrarCancelamentoAntecipado(cancelamento, comTrace), comTrace);
 	}
 
 	registrar(efeitos: EfeitosGravacao): Promise<boolean> {
-		return this.gravar(() => this.gateway.registrarEfeitos(efeitos), efeitos);
+		const comTrace = this.comTrace(efeitos);
+		return this.gravar(() => this.gateway.registrarEfeitos(comTrace), comTrace);
 	}
 
-	async publicar(eventos: EnvelopeMensagem<unknown>[]): Promise<void> {
-		for (const evento of eventos) {
+	async publicar(eventos: EventoPendente[]): Promise<void> {
+		for (const { envelope: evento, cabecalhosTrace } of eventos) {
 			try {
-				await this.publicador.publicarEvento(evento);
+				await this.publicador.publicarEvento(evento, cabecalhosTrace);
 				await this.gateway.marcarEventoPublicado(evento.messageId);
 				this.logger.log({
 					event: "billing.evento.publicado",
@@ -77,7 +82,14 @@ export class EventosOrcamentoService {
 			this.logger.log({ event: "billing.mensagem.duplicada", chave: erro.chave });
 			return false;
 		}
-		await this.publicar(efeitos.eventos);
+		const cabecalhosTrace = efeitos.cabecalhosTrace ?? {};
+		await this.publicar(efeitos.eventos.map((envelope) => ({ envelope, cabecalhosTrace })));
 		return true;
+	}
+
+	/** Captura o trace uma única vez, na transação de origem; gravação e publicação imediata usam o mesmo valor. */
+	private comTrace(efeitos: EfeitosGravacao): EfeitosGravacao {
+		const cabecalhosTrace: CabecalhosTrace = capturarCabecalhosTrace();
+		return { ...efeitos, cabecalhosTrace };
 	}
 }

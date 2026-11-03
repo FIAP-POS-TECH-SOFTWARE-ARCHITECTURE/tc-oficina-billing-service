@@ -1,4 +1,5 @@
 import type { EnvelopeMensagem } from "../../../mensageria/envelope";
+import type { CabecalhosTrace } from "../../../mensageria/trace";
 import type { Orcamento } from "../../domain/orcamento.entity";
 import type { StatusOrcamento } from "../../domain/status-orcamento";
 import type { PagamentoExterno } from "./gateway-pagamento.port";
@@ -21,6 +22,14 @@ export interface EfeitosGravacao {
 	/** itens PAGAMENTO# */
 	pagamentos?: PagamentoExterno[];
 	eventos: EnvelopeMensagem<unknown>[];
+	/** Trace capturado uma vez na gravação; vai em cada item EVENTO# para a republicação reenviar o mesmo contexto. */
+	cabecalhosTrace?: CabecalhosTrace;
+}
+
+/** Evento ainda não publicado, com o trace gravado junto dele. */
+export interface EventoPendente {
+	envelope: EnvelopeMensagem<unknown>;
+	cabecalhosTrace: CabecalhosTrace;
 }
 
 export class MensagemJaProcessadaError extends Error {
@@ -60,6 +69,6 @@ export interface OrcamentosGatewayPort {
 	registrarCancelamentoAntecipado(cancelamento: CancelamentoAntecipado, efeitos: EfeitosGravacao): Promise<void>;
 	/** MensagemJaProcessadaError */
 	registrarEfeitos(efeitos: EfeitosGravacao): Promise<void>;
-	listarEventosPendentes(ocorridosAntesDe: Date, limite: number): Promise<EnvelopeMensagem<unknown>[]>;
+	listarEventosPendentes(ocorridosAntesDe: Date, limite: number): Promise<EventoPendente[]>;
 	marcarEventoPublicado(messageId: string): Promise<void>;
 }

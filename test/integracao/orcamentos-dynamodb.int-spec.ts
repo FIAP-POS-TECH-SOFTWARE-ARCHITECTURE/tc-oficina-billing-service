@@ -84,7 +84,7 @@ describe("OrcamentosDynamoDbGateway contra o emulador", () => {
 		expect((await gateway.buscarPorOsId(orcamento.osId))?.paraDados()).toEqual(orcamento.paraDados());
 		expect((await gateway.buscarPorNumeroOs(orcamento.numeroOs))?.paraDados()).toEqual(orcamento.paraDados());
 		const pendentes = await gateway.listarEventosPendentes(new Date(Date.now() + 60_000), 50);
-		expect(pendentes.map((e) => e.messageId)).toContain(evento.messageId);
+		expect(pendentes.map((e) => e.envelope.messageId)).toContain(evento.messageId);
 	});
 
 	it("mesmo messageId é duplicata; outro messageId para a mesma OS é orçamento existente", async () => {
@@ -142,10 +142,10 @@ describe("OrcamentosDynamoDbGateway contra o emulador", () => {
 		const evento = eventoDe(randomUUID());
 		await gateway.registrarEfeitos({ eventos: [evento] });
 		const pendentes = () => gateway.listarEventosPendentes(new Date(Date.now() + 60_000), 100);
-		expect((await pendentes()).map((e) => e.messageId)).toContain(evento.messageId);
+		expect((await pendentes()).map((e) => e.envelope.messageId)).toContain(evento.messageId);
 
 		await gateway.marcarEventoPublicado(evento.messageId);
 
-		expect((await pendentes()).map((e) => e.messageId)).not.toContain(evento.messageId);
+		expect((await pendentes()).map((e) => e.envelope.messageId)).not.toContain(evento.messageId);
 	});
 });

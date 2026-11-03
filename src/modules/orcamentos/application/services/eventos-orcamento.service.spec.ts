@@ -1,8 +1,11 @@
+import { capturarCabecalhosTrace } from "../../../mensageria/trace";
 import { OrcamentosMemoriaGateway } from "../../../../../test/suporte/orcamentos-memoria.gateway";
 import { PublicadorMemoria } from "../../../../../test/suporte/publicador-memoria";
 import { criarEventoBilling } from "../eventos-billing";
 import { MensagemJaProcessadaError } from "../ports/orcamentos.gateway";
 import { EventosOrcamentoService } from "./eventos-orcamento.service";
+
+jest.mock("../../../mensageria/trace", () => ({ capturarCabecalhosTrace: jest.fn(() => ({})) }));
 
 const contexto = { fluxoId: "f-1", osId: "os-1", numeroOs: "OS-1", correlationId: "req-1" };
 const evento = (ocorridoEm?: Date) => ({
@@ -26,6 +29,22 @@ describe("EventosOrcamentoService", () => {
 		await expect(servico.registrar({ mensagemProcessada: "m1", eventos: [e] })).resolves.toBe(true);
 		expect(publicador.eventos).toEqual([e]);
 		expect(gateway.eventos.get(e.messageId)?.pendente).toBe(false);
+	});
+
+	it("captura o trace uma vez ao gravar, publica com ele e a republicação usa o valor persistido", async () => {
+		const mock = capturarCabecalhosTrace as jest.Mock;
+		mock.mockReturnValue({ traceparent: "00-t-1-01" });
+		const [direto, pendente] = [evento(new Date("2026-10-20T13:05:00.000Z")), evento(new Date("2026-10-20T13:05:01.000Z"))];
+		await servico.registrar({ eventos: [direto] });
+		publicador.falhar = true;
+		await servico.registrar({ eventos: [pendente] });
+		publicador.falhar = false;
+		mock.mockReturnValue({ traceparent: "00-outro-2-01" });
+
+		await servico.republicarPendentes(new Date("2026-10-20T13:06:00.000Z"));
+
+		expect(publicador.traces).toEqual([{ traceparent: "00-t-1-01" }, { traceparent: "00-t-1-01" }]);
+		mock.mockReturnValue({});
 	});
 
 	it("publicador fora do ar não desfaz a gravação: evento fica pendente", async () => {
