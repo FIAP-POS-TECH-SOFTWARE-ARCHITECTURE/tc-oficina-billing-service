@@ -4,6 +4,7 @@ import { CLIENTE_SQS } from "../../common/aws/clientes-aws";
 import { executarComContextoLog } from "../../common/logging/contexto-log";
 import { mensagemDeErro } from "../../common/utils/erro.util";
 import type { EnvelopeMensagem } from "./envelope";
+import { type CabecalhosTrace, executarComTrace } from "./trace";
 import { ValidadorContratos } from "./validador-contratos";
 
 export type ManipuladorMensagem = (envelope: EnvelopeMensagem<unknown>) => Promise<void>;
@@ -89,9 +90,14 @@ export class ConsumidorSqs implements OnApplicationShutdown {
 
 		const envelope = corpo as EnvelopeMensagem<unknown>;
 		const campos = { fluxoId: envelope.fluxoId, osId: envelope.osId, messageId: envelope.messageId, tipo: envelope.tipo };
+		const cabecalhos: CabecalhosTrace = {};
+		for (const chave of ["traceparent", "tracestate", "newrelic"] as const) {
+			const valor = mensagem.MessageAttributes?.[chave]?.StringValue;
+			if (valor) cabecalhos[chave] = valor;
+		}
 		await executarComContextoLog(campos, async () => {
 			try {
-				await manipulador(envelope);
+				await executarComTrace(envelope.tipo, cabecalhos, () => manipulador(envelope));
 				await this.sqs.send(new DeleteMessageCommand({ QueueUrl: filaUrl, ReceiptHandle: mensagem.ReceiptHandle }));
 				this.logger.log({ event: "mensageria.mensagem.processada" });
 			} catch (erro) {

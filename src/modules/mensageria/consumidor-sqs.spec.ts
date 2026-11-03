@@ -5,6 +5,11 @@ import { join } from "node:path";
 import { ConsumidorSqs } from "./consumidor-sqs";
 import { ValidadorContratos } from "./validador-contratos";
 
+jest.mock("./trace", () => ({
+	...jest.requireActual("./trace"),
+	executarComTrace: jest.fn((_nome: string, _cabecalhos: unknown, fn: () => Promise<unknown>) => fn()),
+}));
+
 const FILA = "http://localhost:4566/000000000000/oficina-teste-billing-comandos";
 const EXEMPLO = readFileSync(join(process.cwd(), "contratos", "exemplos", "GerarOrcamento.json"), "utf8");
 
@@ -15,6 +20,19 @@ describe("ConsumidorSqs", () => {
 	const receber = (...corpos: string[]) =>
 		sqsMock.on(ReceiveMessageCommand).resolves({
 			Messages: corpos.map((Body, i) => ({ Body, MessageId: `sqs-${i}`, ReceiptHandle: `rh-${i}` })),
+		});
+	const receberComTrace = (corpo: string, trace: Record<string, string>) =>
+		sqsMock.on(ReceiveMessageCommand).resolves({
+			Messages: [
+				{
+					Body: corpo,
+					MessageId: "sqs-0",
+					ReceiptHandle: "rh-0",
+					MessageAttributes: Object.fromEntries(
+						Object.entries(trace).map(([chave, valor]) => [chave, { DataType: "String", StringValue: valor }]),
+					),
+				},
+			],
 		});
 
 	beforeEach(() => {
@@ -41,6 +59,26 @@ describe("ConsumidorSqs", () => {
 			expect.objectContaining({ tipo: "GerarOrcamento", osId: "9c8b7a6d-5e4f-4a3b-8c2d-1e0f9a8b7c6d" }),
 		);
 		expect(sqsMock.commandCalls(DeleteMessageCommand)[0].args[0].input).toEqual({ QueueUrl: FILA, ReceiptHandle: "rh-0" });
+	});
+
+	it("processa dentro de transação de trace com os atributos recebidos", async () => {
+		const executarComTrace = jest.requireMock("./trace").executarComTrace as jest.Mock;
+		const trace = { traceparent: "00-a-b-01", tracestate: "k=v" };
+		receberComTrace(EXEMPLO, trace);
+		const manipulador = jest.fn().mockResolvedValue(undefined);
+		await consumidor.processarLote(FILA, manipulador, 0);
+		expect(executarComTrace).toHaveBeenCalledWith("GerarOrcamento", trace, expect.any(Function));
+		expect(manipulador).toHaveBeenCalledTimes(1);
+		expect(sqsMock.commandCalls(DeleteMessageCommand)).toHaveLength(1);
+	});
+
+	it("mensagem sem atributos de trace ainda é processada", async () => {
+		const executarComTrace = jest.requireMock("./trace").executarComTrace as jest.Mock;
+		receberComTrace(EXEMPLO, {});
+		const manipulador = jest.fn().mockResolvedValue(undefined);
+		await consumidor.processarLote(FILA, manipulador, 0);
+		expect(executarComTrace).toHaveBeenCalledWith("GerarOrcamento", {}, expect.any(Function));
+		expect(manipulador).toHaveBeenCalledTimes(1);
 	});
 
 	it("não apaga quando o manipulador falha (volta à fila; 5 falhas → DLQ)", async () => {

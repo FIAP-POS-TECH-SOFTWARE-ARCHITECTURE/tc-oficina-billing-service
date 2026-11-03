@@ -5,7 +5,10 @@ import { criarEventoBilling } from "../eventos-billing";
 import { MensagemJaProcessadaError } from "../ports/orcamentos.gateway";
 import { EventosOrcamentoService } from "./eventos-orcamento.service";
 
-jest.mock("../../../mensageria/trace", () => ({ capturarCabecalhosTrace: jest.fn(() => ({})) }));
+jest.mock("../../../mensageria/trace", () => ({
+	...jest.requireActual("../../../mensageria/trace"),
+	capturarCabecalhosTrace: jest.fn(() => ({})),
+}));
 
 const contexto = { fluxoId: "f-1", osId: "os-1", numeroOs: "OS-1", correlationId: "req-1" };
 const evento = (ocorridoEm?: Date) => ({
