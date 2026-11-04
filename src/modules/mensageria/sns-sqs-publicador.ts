@@ -5,6 +5,7 @@ import { CLIENTE_SNS, CLIENTE_SQS } from "../../common/aws/clientes-aws";
 import { montarAtributos } from "./atributos-mensagem";
 import type { EnvelopeMensagem } from "./envelope";
 import type { PublicadorMensagensPort } from "./publicador-mensagens.port";
+import type { CabecalhosTrace } from "./trace";
 
 @Injectable()
 export class SnsSqsPublicador implements PublicadorMensagensPort {
@@ -13,17 +14,21 @@ export class SnsSqsPublicador implements PublicadorMensagensPort {
 		@Inject(CLIENTE_SQS) private readonly sqs: SQSClient,
 	) {}
 
-	async enviarComando(fila: string, envelope: EnvelopeMensagem<unknown>): Promise<void> {
+	async enviarComando(fila: string, envelope: EnvelopeMensagem<unknown>, trace?: CabecalhosTrace): Promise<void> {
 		await this.sqs.send(
-			new SendMessageCommand({ QueueUrl: fila, MessageBody: JSON.stringify(envelope), MessageAttributes: montarAtributos(envelope) }),
+			new SendMessageCommand({
+				QueueUrl: fila,
+				MessageBody: JSON.stringify(envelope),
+				MessageAttributes: montarAtributos(envelope, trace),
+			}),
 		);
 	}
 
-	async publicarEvento(envelope: EnvelopeMensagem<unknown>): Promise<void> {
+	async publicarEvento(envelope: EnvelopeMensagem<unknown>, trace?: CabecalhosTrace): Promise<void> {
 		const topico = process.env.SNS_EVENTOS_ARN;
 		if (!topico) throw new Error("SNS_EVENTOS_ARN não definido");
 		await this.sns.send(
-			new PublishCommand({ TopicArn: topico, Message: JSON.stringify(envelope), MessageAttributes: montarAtributos(envelope) }),
+			new PublishCommand({ TopicArn: topico, Message: JSON.stringify(envelope), MessageAttributes: montarAtributos(envelope, trace) }),
 		);
 	}
 }

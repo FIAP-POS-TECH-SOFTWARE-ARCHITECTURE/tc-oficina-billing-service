@@ -37,6 +37,17 @@ describe("SnsSqsPublicador", () => {
 		});
 	});
 
+	it("repassa o trace aos MessageAttributes de evento e de comando", async () => {
+		const trace = { traceparent: "00-a-b-01" };
+		snsMock.on(PublishCommand).resolves({ MessageId: "sns-1" });
+		sqsMock.on(SendMessageCommand).resolves({ MessageId: "sqs-1" });
+		await publicador.publicarEvento(envelope, trace);
+		await publicador.enviarComando("http://fila", envelope, trace);
+		const esperado = { DataType: "String", StringValue: "00-a-b-01" };
+		expect(snsMock.commandCalls(PublishCommand)[0].args[0].input.MessageAttributes).toHaveProperty("traceparent", esperado);
+		expect(sqsMock.commandCalls(SendMessageCommand)[0].args[0].input.MessageAttributes).toHaveProperty("traceparent", esperado);
+	});
+
 	it("falha explicitamente sem SNS_EVENTOS_ARN", async () => {
 		delete process.env.SNS_EVENTOS_ARN;
 		await expect(publicador.publicarEvento(envelope)).rejects.toThrow("SNS_EVENTOS_ARN");

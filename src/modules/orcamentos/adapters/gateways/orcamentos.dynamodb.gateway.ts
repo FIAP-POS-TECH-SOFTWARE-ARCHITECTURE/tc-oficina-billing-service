@@ -9,11 +9,13 @@ import {
 import { Inject, Injectable } from "@nestjs/common";
 import { CLIENTE_DYNAMODB } from "../../../../common/aws/clientes-aws";
 import type { EnvelopeMensagem } from "../../../mensageria/envelope";
+import type { CabecalhosTrace } from "../../../mensageria/trace";
 import type { PagamentoExterno } from "../../application/ports/gateway-pagamento.port";
 import {
 	type CancelamentoAntecipado,
 	ConflitoConcorrenciaError,
 	type EfeitosGravacao,
+	type EventoPendente,
 	MensagemJaProcessadaError,
 	OrcamentoJaExisteError,
 	type OrcamentosGatewayPort,
@@ -168,7 +170,7 @@ export class OrcamentosDynamoDbGateway implements OrcamentosGatewayPort {
 		await this.executar(itens, efeitos, () => new ConflitoConcorrenciaError("efeitos"));
 	}
 
-	async listarEventosPendentes(ocorridosAntesDe: Date, limite: number): Promise<EnvelopeMensagem<unknown>[]> {
+	async listarEventosPendentes(ocorridosAntesDe: Date, limite: number): Promise<EventoPendente[]> {
 		const r = await this.db.send(
 			new QueryCommand({
 				TableName: this.tabela,
@@ -178,7 +180,10 @@ export class OrcamentosDynamoDbGateway implements OrcamentosGatewayPort {
 				Limit: limite,
 			}),
 		);
-		return (r.Items ?? []).map((item) => item.envelope as EnvelopeMensagem<unknown>);
+		return (r.Items ?? []).map((item) => ({
+			envelope: item.envelope as EnvelopeMensagem<unknown>,
+			cabecalhosTrace: (item.cabecalhosTrace ?? {}) as CabecalhosTrace,
+		}));
 	}
 
 	async marcarEventoPublicado(messageId: string): Promise<void> {
@@ -261,6 +266,7 @@ export class OrcamentosDynamoDbGateway implements OrcamentosGatewayPort {
 					tipoItem: "EVENTO",
 					tipo: evento.tipo,
 					envelope: evento,
+					cabecalhosTrace: efeitos.cabecalhosTrace ?? {},
 					eventoPendente: true,
 					gsi1pk: "EVENTO_PENDENTE",
 					gsi1sk: `${evento.ocorridoEm}#${evento.messageId}`,
