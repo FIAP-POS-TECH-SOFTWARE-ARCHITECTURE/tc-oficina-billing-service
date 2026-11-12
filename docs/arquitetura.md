@@ -91,6 +91,7 @@ Todas passam pelo API Gateway com o prefixo `/billing` (o gateway não reescreve
 | `GET /billing/orcamentos/:numeroOs` | `ATENDENTE`, `ADMINISTRADOR` | consultar |
 | `GET /billing/orcamentos?status=` | `ATENDENTE`, `ADMINISTRADOR` | listar por status |
 | `GET /health` | pública, sem prefixo | probe do Kubernetes |
+| `GET /health/ready` | pública, sem prefixo | readiness (consulta o DynamoDB) |
 
 Origem no código: `orcamentos-cliente.controller.ts` (`@Controller("billing/cliente/orcamentos")`, linhas 18, 26, 33 e 41), `orcamentos.controller.ts` (`@Controller("billing/orcamentos")`, linhas 14, 21 e 28).
 
@@ -214,7 +215,7 @@ O fluxo da OS é coordenado por uma **Saga orquestrada** (Saga Pattern): um orqu
 | --- | --- | --- | --- |
 | Gerar orçamento | `GerarOrcamento` | cria o orçamento em `AGUARDANDO_APROVACAO` | `OrcamentoGerado` / `FalhaGerarOrcamento` |
 | Compensar: desfazer o orçamento | `CancelarOrcamento` | `AGUARDANDO_APROVACAO` ou `APROVADO` → `CANCELADO` | `OrcamentoCancelado` |
-| Compensar: devolver o dinheiro | `EstornarPagamento` | `PAGO` → `ESTORNADO` | `PagamentoEstornado` / `EstornoFalhou` (este último ainda não emitido) |
+| Compensar: devolver o dinheiro | `EstornarPagamento` | `PAGO` → `ESTORNADO` (sem pagamento registrado, só reemite `PagamentoEstornado` com `pagamentoId` nulo) | `PagamentoEstornado` / `EstornoFalhou` (este último ainda não emitido) |
 
 A aprovação e a rejeição acontecem por HTTP, pelo cliente, e viram os eventos `OrcamentoAprovado` e `OrcamentoRejeitado`, que o orquestrador consome para avançar. O pagamento é o último passo antes do reparo (contramedida de *visão pessimista*: o reparo só começa com o dinheiro já confirmado).
 

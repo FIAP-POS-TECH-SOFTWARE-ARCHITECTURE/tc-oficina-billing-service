@@ -70,7 +70,7 @@ Visão da solução e decisão da Saga, no `os-service`:
 | --- | --- | --- | --- |
 | Gerar orçamento | `GerarOrcamento` | cria o orçamento em `AGUARDANDO_APROVACAO` | `OrcamentoGerado` / `FalhaGerarOrcamento` |
 | Compensar: desfazer o orçamento | `CancelarOrcamento` | `AGUARDANDO_APROVACAO` ou `APROVADO` → `CANCELADO` | `OrcamentoCancelado` |
-| Compensar: devolver o dinheiro | `EstornarPagamento` | `PAGO` → `ESTORNADO` | `PagamentoEstornado` |
+| Compensar: devolver o dinheiro | `EstornarPagamento` | `PAGO` → `ESTORNADO` (sem pagamento registrado, só reemite `PagamentoEstornado` com `pagamentoId` nulo) | `PagamentoEstornado` |
 
 A aprovação e a rejeição acontecem por HTTP, pelo cliente, e viram os eventos `OrcamentoAprovado`
 e `OrcamentoRejeitado`, que o orquestrador consome para avançar. O pagamento é o último passo
