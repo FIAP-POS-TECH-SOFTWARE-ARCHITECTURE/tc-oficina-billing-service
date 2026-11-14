@@ -22,6 +22,7 @@ import { EstornarPagamentoUseCase } from "./application/use-cases/estornar-pagam
 import { GerarOrcamentoUseCase } from "./application/use-cases/gerar-orcamento.use-case";
 import { ListarOrcamentosUseCase } from "./application/use-cases/listar-orcamentos.use-case";
 import { ProcessarNotificacaoPagamentoUseCase } from "./application/use-cases/processar-notificacao-pagamento.use-case";
+import { ReconciliarPagamentosUseCase } from "./application/use-cases/reconciliar-pagamentos.use-case";
 import { RegistrarPagamentoUseCase } from "./application/use-cases/registrar-pagamento.use-case";
 import { RejeitarOrcamentoUseCase } from "./application/use-cases/rejeitar-orcamento.use-case";
 import { RetentarEstornosUseCase } from "./application/use-cases/retentar-estornos.use-case";
@@ -50,6 +51,7 @@ export function criarGatewayPagamento(token = process.env.MERCADO_PAGO_ACCESS_TO
 		RegistrarPagamentoUseCase,
 		ProcessarNotificacaoPagamentoUseCase,
 		RetentarEstornosUseCase,
+		ReconciliarPagamentosUseCase,
 		ConsumidorComandosBilling,
 		RepublicacaoEventosJob,
 		RetentativaEstornosJob,

@@ -3,6 +3,7 @@ import type { AprovarOrcamentoUseCase } from "../application/use-cases/aprovar-o
 import type { ConsultarOrcamentoClienteUseCase } from "../application/use-cases/consultar-orcamento-cliente.use-case";
 import type { ConsultarOrcamentoUseCase } from "../application/use-cases/consultar-orcamento.use-case";
 import type { ListarOrcamentosUseCase } from "../application/use-cases/listar-orcamentos.use-case";
+import type { ReconciliarPagamentosUseCase } from "../application/use-cases/reconciliar-pagamentos.use-case";
 import type { RejeitarOrcamentoUseCase } from "../application/use-cases/rejeitar-orcamento.use-case";
 import { StatusOrcamento } from "../domain/status-orcamento";
 import { OrcamentosClienteController } from "./orcamentos-cliente.controller";
@@ -47,9 +48,11 @@ describe("OrcamentosClienteController", () => {
 describe("OrcamentosController", () => {
 	const listar = { execute: jest.fn().mockResolvedValue(OK) };
 	const consultar = { execute: jest.fn().mockResolvedValue(OK) };
+	const reconciliar = { execute: jest.fn().mockResolvedValue(OK) };
 	const controller = new OrcamentosController(
 		listar as unknown as ListarOrcamentosUseCase,
 		consultar as unknown as ConsultarOrcamentoUseCase,
+		reconciliar as unknown as ReconciliarPagamentosUseCase,
 	);
 
 	it("listar repassa o filtro de status", async () => {
@@ -61,5 +64,10 @@ describe("OrcamentosController", () => {
 	it("consultar repassa o número da OS", async () => {
 		await controller.consultar("OS-1");
 		expect(consultar.execute).toHaveBeenCalledWith("OS-1");
+	});
+
+	it("reconciliar repassa o número da OS e o correlationId da requisição", async () => {
+		await controller.reconciliar("OS-1", req);
+		expect(reconciliar.execute).toHaveBeenCalledWith("OS-1", "req-1");
 	});
 });
