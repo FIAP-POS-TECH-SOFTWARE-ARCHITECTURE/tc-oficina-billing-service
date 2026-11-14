@@ -60,14 +60,24 @@ describe("EstornarPagamentoUseCase", () => {
 		expect(estornados()).toEqual([{ orcamentoId: orcamento.id, pagamentoId: "1234567890", valorCentavos: 30000 }]);
 	});
 
-	it("falha do provedor propaga e mantém o status", async () => {
+	it("falha do provedor deixa o estorno pendente e publica EstornoFalhou", async () => {
 		const orcamento = salvar(orcamentoPago());
 		pagamentos.falharEstornos = true;
 
-		await expect(uc.execute(comandoComMotivo("EstornarPagamento"))).rejects.toThrow("Estorno recusado");
+		await expect(uc.execute(comandoComMotivo("EstornarPagamento"))).resolves.toBeUndefined();
 
-		expect((await gateway.buscarPorId(orcamento.id))?.status).toBe(StatusOrcamento.PAGO);
+		expect((await gateway.buscarPorId(orcamento.id))?.status).toBe(StatusOrcamento.ESTORNO_PENDENTE);
 		expect(estornados()).toEqual([]);
+		expect(publicador.doTipo("EstornoFalhou")).toHaveLength(1);
+	});
+
+	it("comando com estorno pendente tenta de novo na hora", async () => {
+		const orcamento = salvar(orcamentoPago().registrarFalhaEstorno("fora do ar", new Date(Date.now() + 60_000), new Date()));
+
+		await uc.execute(comandoComMotivo("EstornarPagamento"));
+
+		expect((await gateway.buscarPorId(orcamento.id))?.status).toBe(StatusOrcamento.ESTORNADO);
+		expect(estornados()).toEqual([{ orcamentoId: orcamento.id, pagamentoId: "1234567890", valorCentavos: 30000 }]);
 	});
 
 	it("comando duplicado não faz nada", async () => {
