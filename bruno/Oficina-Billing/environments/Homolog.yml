@@ -1,0 +1,12 @@
+# url e osUrl: URL do API Gateway de homolog (saída api_endpoint do Terraform do tc-oficina-lambda-auth);
+# pelo gateway, /billing/* vai para este serviço e /auth/login para o os-service.
+# webhookSecret: valor do SSM do ambiente; preencher só na sessão local do Bruno, nunca commitar.
+vars:
+  url: ""
+  osUrl: ""
+  token: ""
+  clienteToken: ""
+  osNumero: ""
+  orderId: ""
+  webhookSecret: ""
+  linkPagamento: ""

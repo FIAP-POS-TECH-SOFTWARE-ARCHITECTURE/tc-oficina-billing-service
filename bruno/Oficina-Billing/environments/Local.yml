@@ -1,0 +1,11 @@
+# webhookSecret: o mesmo MERCADO_PAGO_WEBHOOK_SECRET do .env do billing; preencher só na sessão local do Bruno.
+vars:
+  url: http://localhost:3001
+  osUrl: http://localhost:3000
+  token: ""
+  # JWT de cliente emitido pela autenticação via CPF (tc-oficina-lambda-auth); cole o valor manualmente.
+  clienteToken: ""
+  osNumero: ""
+  orderId: ""
+  webhookSecret: ""
+  linkPagamento: ""

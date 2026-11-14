@@ -1,0 +1,23 @@
+info:
+  name: Rejeitar Orcamento
+  type: http
+  seq: 3
+
+http:
+  method: POST
+  url: "{{url}}/billing/cliente/orcamentos/{{osNumero}}/rejeitar"
+  body:
+    type: json
+    data: |-
+      {
+        "motivo": "Valor acima do esperado"
+      }
+  auth:
+    type: bearer
+    token: "{{clienteToken}}"
+
+settings:
+  encodeUrl: true
+  timeout: 0
+  followRedirects: true
+  maxRedirects: 5
