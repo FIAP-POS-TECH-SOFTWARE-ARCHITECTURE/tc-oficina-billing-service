@@ -39,6 +39,7 @@
 		"class-validator": "^0.15.1",
 		"express-rate-limit": "^8.7.1",
 		"helmet": "^8.3.0",
+		"mercadopago": "^3.6.2",
 		"nestjs-pino": "^4.6.1",
 		"newrelic": "^14.9.0",
 		"pino": "^10.4.0",
