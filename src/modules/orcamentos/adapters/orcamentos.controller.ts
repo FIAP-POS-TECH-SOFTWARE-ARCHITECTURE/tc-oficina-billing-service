@@ -1,10 +1,13 @@
-import { Controller, Get, Param, Query } from "@nestjs/common";
+import { Controller, Get, HttpCode, Param, Post, Query, Req } from "@nestjs/common";
 import { ApiBearerAuth, ApiOperation, ApiTags } from "@nestjs/swagger";
+import type { Request } from "express";
 import { ApiEnvelopedResponse } from "../../../common/decorators/api-enveloped-response.decorator";
 import { Roles } from "../../../common/decorators/roles.decorator";
 import { Role } from "../../../common/enums/role.enum";
+import { correlationIdDaRequisicao } from "../../../common/utils/correlation-id.util";
 import { ConsultarOrcamentoUseCase } from "../application/use-cases/consultar-orcamento.use-case";
 import { ListarOrcamentosUseCase } from "../application/use-cases/listar-orcamentos.use-case";
+import { ReconciliarPagamentosUseCase } from "../application/use-cases/reconciliar-pagamentos.use-case";
 import { ListarOrcamentosDto } from "../dto/listar-orcamentos.dto";
 import { OrcamentoResponseDto } from "../dto/orcamento-response.dto";
 
@@ -16,6 +19,7 @@ export class OrcamentosController {
 	constructor(
 		private readonly listarUc: ListarOrcamentosUseCase,
 		private readonly consultarUc: ConsultarOrcamentoUseCase,
+		private readonly reconciliarUc: ReconciliarPagamentosUseCase,
 	) {}
 
 	@Get()
@@ -30,5 +34,12 @@ export class OrcamentosController {
 	@ApiEnvelopedResponse(OrcamentoResponseDto)
 	consultar(@Param("numeroOs") numeroOs: string) {
 		return this.consultarUc.execute(numeroOs);
+	}
+
+	@Post(":numeroOs/reconciliar")
+	@HttpCode(200)
+	@ApiOperation({ summary: "Buscar as orders do orçamento no Mercado Pago e registrar as pagas (webhook perdido)" })
+	reconciliar(@Param("numeroOs") numeroOs: string, @Req() req: Request) {
+		return this.reconciliarUc.execute(numeroOs, correlationIdDaRequisicao(req));
 	}
 }
