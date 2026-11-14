@@ -9,7 +9,10 @@ import { CancelarOrcamentoUseCase } from "../../src/modules/orcamentos/applicati
 import { ConsultarOrcamentoClienteUseCase } from "../../src/modules/orcamentos/application/use-cases/consultar-orcamento-cliente.use-case";
 import { EstornarPagamentoUseCase } from "../../src/modules/orcamentos/application/use-cases/estornar-pagamento.use-case";
 import { GerarOrcamentoUseCase } from "../../src/modules/orcamentos/application/use-cases/gerar-orcamento.use-case";
+import { ProcessarNotificacaoPagamentoUseCase } from "../../src/modules/orcamentos/application/use-cases/processar-notificacao-pagamento.use-case";
+import { RegistrarPagamentoUseCase } from "../../src/modules/orcamentos/application/use-cases/registrar-pagamento.use-case";
 import { RejeitarOrcamentoUseCase } from "../../src/modules/orcamentos/application/use-cases/rejeitar-orcamento.use-case";
+import { RetentarEstornosUseCase } from "../../src/modules/orcamentos/application/use-cases/retentar-estornos.use-case";
 import { OrcamentosMemoriaGateway } from "./orcamentos-memoria.gateway";
 import { PublicadorMemoria } from "./publicador-memoria";
 
@@ -20,6 +23,7 @@ export function criarMundoBilling() {
 	const pagamentos = new GatewayPagamentoSimulado();
 	const eventos = new EventosOrcamentoService(gateway, publicador);
 	const estorno = new EstornoService(pagamentos, eventos);
+	const registrarPagamento = new RegistrarPagamentoUseCase(gateway, pagamentos, eventos);
 
 	return {
 		gateway,
@@ -33,6 +37,9 @@ export function criarMundoBilling() {
 		aprovar: new AprovarOrcamentoUseCase(gateway, pagamentos, eventos),
 		rejeitar: new RejeitarOrcamentoUseCase(gateway, eventos),
 		consultarCliente: new ConsultarOrcamentoClienteUseCase(gateway),
+		registrarPagamento,
+		processarNotificacao: new ProcessarNotificacaoPagamentoUseCase(pagamentos, registrarPagamento),
+		retentarEstornos: new RetentarEstornosUseCase(gateway, estorno),
 		/** Resposta da última chamada HTTP simulada. */
 		ultimaResposta: undefined as IServiceResponse<any> | undefined,
 		/** Último comando GerarOrcamento entregue. */
