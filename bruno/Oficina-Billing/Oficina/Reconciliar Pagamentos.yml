@@ -1,0 +1,15 @@
+info:
+  name: Reconciliar Pagamentos
+  type: http
+  seq: 3
+
+http:
+  method: POST
+  url: "{{url}}/billing/orcamentos/{{osNumero}}/reconciliar"
+  auth: inherit
+
+settings:
+  encodeUrl: true
+  timeout: 0
+  followRedirects: true
+  maxRedirects: 5

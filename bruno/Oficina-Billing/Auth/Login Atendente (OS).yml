@@ -1,0 +1,30 @@
+info:
+  name: Login Atendente (OS)
+  type: http
+  seq: 1
+
+http:
+  method: POST
+  url: "{{osUrl}}/auth/login"
+  body:
+    type: json
+    data: |-
+      {
+        "email": "atendente@oficina.local",
+        "senha": "Atendente@2024"
+      }
+  auth: none
+
+runtime:
+  scripts:
+    - type: after-response
+      code: |-
+        if (res.body && res.body.data && res.body.data.accessToken) {
+          bru.setEnvVar("token", res.body.data.accessToken);
+        }
+
+settings:
+  encodeUrl: true
+  timeout: 0
+  followRedirects: true
+  maxRedirects: 5
