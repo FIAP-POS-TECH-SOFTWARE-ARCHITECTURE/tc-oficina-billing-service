@@ -220,11 +220,12 @@ HPA de 1 a 4 réplicas por CPU (70%) — mesma estratégia do restante da soluç
 (AWS Academy, rotativos) e `NEW_RELIC_LICENSE_KEY`.
 
 **Parâmetros SSM lidos pelo CD** (`/oficina/<env>/...`): `jwt-secret`,
-`mensageria/eventos-topic-arn`, `mensageria/billing-comandos-url` e `billing/dynamodb-table`. O
-CD escreve `billing-service-lb-hostname` para o gateway. O `terraform apply` da infraestrutura é
-manual, em `tc-oficina-infra-k8s` e `tc-oficina-infra-db`; este pipeline faz só o deploy da
-aplicação. O CD ainda não leva as credenciais do Mercado Pago para o Secret: até isso entrar, o
-serviço no cluster sobe com o gateway simulado (log `billing.pagamento.gateway-simulado`).
+`mensageria/eventos-topic-arn`, `mensageria/billing-comandos-url`, `billing/dynamodb-table`,
+`mercado-pago/access-token` e `mercado-pago/webhook-secret` (todos obrigatórios: se faltar algum,
+o step falha antes de sobrescrever o Secret em uso) e `mercado-pago/notification-url`
+(opcional). O CD escreve `billing-service-lb-hostname` para o gateway. O `terraform apply` da
+infraestrutura é manual, em `tc-oficina-infra-k8s` e `tc-oficina-infra-db`; este pipeline faz
+só o deploy da aplicação.
 
 ## API ✱
 
