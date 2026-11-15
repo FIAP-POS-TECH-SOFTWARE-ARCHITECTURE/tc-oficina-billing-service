@@ -14,8 +14,9 @@ Na Fase 4 o monólito da Fase 3 foi dividido em três microsserviços (`os-servi
 
 - **orçamento**: gera o orçamento a partir do comando `GerarOrcamento` (validando que o total é a
   soma dos itens) e expõe ao cliente a consulta, a aprovação e a rejeição;
-- **pagamento**: na aprovação, cria a cobrança e devolve o `linkPagamento` ao cliente; no estorno,
-  chama o provedor com chave de idempotência;
+- **pagamento**: na aprovação, cria a cobrança no Mercado Pago e devolve o `linkPagamento` ao
+  cliente; recebe a notificação de pagamento pelo webhook assinado e publica `PagamentoConfirmado`;
+  no estorno, chama o provedor com chave de idempotência e, se ele falhar, agenda novas tentativas;
 - **compensações**: cancela o orçamento (`CancelarOrcamento`) e estorna o pagamento
   (`EstornarPagamento`) quando o orquestrador desfaz o fluxo.
 
@@ -25,11 +26,13 @@ código, módulo `orquestracao-os`, com o estado em `FluxoOrdemServico` e o coor
 `OrquestradorOrdemServico`). O billing não tem lógica de orquestração e não conhece o
 `execution-service`: recebe comandos e publica eventos.
 
-**Pagamento.** Hoje o provedor é um adapter simulado (`gateway-pagamento.simulado.ts`) atrás da
-porta `GatewayPagamentoPort`. O Mercado Pago é o adapter-alvo da mesma porta
-([ADR-013](https://github.com/FIAP-POS-TECH-SOFTWARE-ARCHITECTURE/tc-oficina-os-service/blob/main/docs/arquitetura/adrs/adr-013-pagamento-antes-do-reparo-mercado-pago.md));
-por isso ainda não há controller de webhook de pagamento (detalhes em
-[`docs/arquitetura.md`](docs/arquitetura.md)).
+**Pagamento.** O provedor é o Mercado Pago (Checkout Pro pela API de Orders), atrás da porta
+`GatewayPagamentoPort`
+([ADR-013](https://github.com/FIAP-POS-TECH-SOFTWARE-ARCHITECTURE/tc-oficina-os-service/blob/main/docs/arquitetura/adrs/adr-013-pagamento-antes-do-reparo-mercado-pago.md)).
+O adapter é escolhido na subida: com `MERCADO_PAGO_ACCESS_TOKEN` o serviço usa o
+`MercadoPagoGateway`; sem ele, usa o `GatewayPagamentoSimulado` e avisa no log
+(`billing.pagamento.gateway-simulado`), o que mantém o ambiente local e os testes sem conta
+externa (detalhes em [`docs/arquitetura.md`](docs/arquitetura.md)).
 
 A aplicação roda atrás do **API Gateway HTTP API** (rotas com o prefixo `/billing`) em dois
 ambientes, `homolog` e `prod`, separados por namespace no EKS, e emite telemetria para o New
@@ -44,6 +47,7 @@ Relic (APM, logs estruturados e rastreamento distribuído entre os serviços).
 | Banco | Amazon DynamoDB, tabela única `oficina-billing-<env>` (chaves `pk`/`sk` e índice `gsi1`) |
 | Acesso a dados | AWS SDK v3 (`@aws-sdk/lib-dynamodb`), escrita condicional por `versao` |
 | Mensageria | Amazon SNS + SQS (AWS SDK v3), com outbox no próprio DynamoDB e idempotência por `messageId` |
+| Pagamento | Mercado Pago (SDK oficial `mercadopago`, API de Orders do Checkout Pro), webhook com assinatura HMAC `x-signature` |
 | Contratos | JSON Schema (Ajv) em [`contratos/`](contratos/README.md), validados na publicação e no consumo |
 | Auth | JWT HS256 (`@nestjs/jwt`): token de staff (papéis `ATENDENTE`, `ADMINISTRADOR`) e token de cliente emitido pela Lambda |
 | Testes | Jest 30 + `jest-cucumber` (BDD) + Supertest + Testcontainers + MiniStack |
@@ -70,10 +74,11 @@ Visão da solução e decisão da Saga, no `os-service`:
 | --- | --- | --- | --- |
 | Gerar orçamento | `GerarOrcamento` | cria o orçamento em `AGUARDANDO_APROVACAO` | `OrcamentoGerado` / `FalhaGerarOrcamento` |
 | Compensar: desfazer o orçamento | `CancelarOrcamento` | `AGUARDANDO_APROVACAO` ou `APROVADO` → `CANCELADO` | `OrcamentoCancelado` |
-| Compensar: devolver o dinheiro | `EstornarPagamento` | `PAGO` → `ESTORNADO` (sem pagamento registrado, só reemite `PagamentoEstornado` com `pagamentoId` nulo) | `PagamentoEstornado` |
+| Compensar: devolver o dinheiro | `EstornarPagamento` | `PAGO` → `ESTORNADO`; se o provedor falhar, `PAGO` → `ESTORNO_PENDENTE` com retentativa agendada (sem pagamento registrado, só reemite `PagamentoEstornado` com `pagamentoId` nulo) | `PagamentoEstornado` / `EstornoFalhou` |
 
 A aprovação e a rejeição acontecem por HTTP, pelo cliente, e viram os eventos `OrcamentoAprovado`
-e `OrcamentoRejeitado`, que o orquestrador consome para avançar. O pagamento é o último passo
+e `OrcamentoRejeitado`, que o orquestrador consome para avançar. O pagamento chega pelo webhook do
+Mercado Pago e vira `PagamentoConfirmado`, que libera o reparo. O pagamento é o último passo
 antes do reparo (contramedida de *visão pessimista* contra *dirty read*). Contra *lost update*,
 o billing aplica a contramedida **rever/reler valor**: toda escrita no DynamoDB é condicional por
 `versao`, então a aprovação do cliente que corre contra um `CancelarOrcamento` não sobrescreve a
@@ -91,11 +96,10 @@ de idempotência: [`contratos/README.md`](contratos/README.md).
 | Sentido | Recurso | Tipos de mensagem |
 | --- | --- | --- |
 | Consome (comando) | fila `oficina-<env>-billing-comandos` (origem `os`) | `GerarOrcamento`, `CancelarOrcamento`, `EstornarPagamento` |
-| Produz (evento) | tópico SNS `oficina-<env>-eventos` (`origem: billing`) | `OrcamentoGerado`, `FalhaGerarOrcamento`, `OrcamentoAprovado`, `OrcamentoRejeitado`, `OrcamentoCancelado`, `PagamentoEstornado` |
+| Produz (evento) | tópico SNS `oficina-<env>-eventos` (`origem: billing`) | `OrcamentoGerado`, `FalhaGerarOrcamento`, `OrcamentoAprovado`, `OrcamentoRejeitado`, `OrcamentoCancelado`, `PagamentoConfirmado`, `PagamentoEstornado`, `EstornoFalhou` |
 
-`PagamentoConfirmado` e `EstornoFalhou` estão no catálogo do contrato, mas dependem do adapter do
-Mercado Pago e ainda não são emitidos. Os eventos saem por um outbox gravado na mesma transação
-do efeito, republicado por um job a cada 15 s se a publicação imediata falhar.
+Os eventos saem por um outbox gravado na mesma transação do efeito, republicado por um job a cada
+15 s se a publicação imediata falhar.
 
 ### Síncrona (REST)
 
@@ -105,6 +109,8 @@ do efeito, republicado por um job a cada 15 s se a publicação imediata falhar.
 | `POST /billing/cliente/orcamentos/:numeroOs/aprovar` | cliente dono da OS | token de cliente; `422` fora de `AGUARDANDO_APROVACAO` ou com prazo vencido |
 | `POST /billing/cliente/orcamentos/:numeroOs/rejeitar` | cliente dono da OS | token de cliente; `422` fora de `AGUARDANDO_APROVACAO` |
 | `GET /billing/orcamentos/:numeroOs`, `GET /billing/orcamentos?status=` | staff | JWT interno (`ATENDENTE`, `ADMINISTRADOR`) |
+| `POST /billing/orcamentos/:numeroOs/reconciliar` | staff, quando a notificação de pagamento se perdeu | JWT interno (`ATENDENTE`, `ADMINISTRADOR`) |
+| `POST /billing/webhooks/mercado-pago` | Mercado Pago | pública, validada por `x-signature`; `401` com assinatura inválida, `503` em falha temporária |
 | `GET /health`, `GET /health/ready` | probes do Kubernetes | pública |
 
 ## Como executar localmente ✱
@@ -152,8 +158,15 @@ Variáveis (base em [`.env.example`](.env.example)):
 | `AWS_REGION`, `AWS_ENDPOINT_URL`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` | AWS SDK; as três últimas só no emulador local |
 | `DYNAMODB_TABLE` | tabela do serviço |
 | `SNS_EVENTOS_ARN`, `SQS_BILLING_COMANDOS_URL` | mensageria |
-| `WORKERS_HABILITADOS` | `false` desliga o consumidor da fila e o job de republicação |
+| `WORKERS_HABILITADOS` | `false` desliga o consumidor da fila e os jobs de republicação e de retentativa de estorno |
+| `MERCADO_PAGO_ACCESS_TOKEN` | access token da aplicação no Mercado Pago; vazio usa o gateway simulado |
+| `MERCADO_PAGO_WEBHOOK_SECRET` | segredo da assinatura do webhook (`x-signature`) |
+| `MERCADO_PAGO_NOTIFICATION_URL` | URL pública do webhook enviada na criação da order; vazio usa a configurada no painel do Mercado Pago |
 | `NEW_RELIC_LICENSE_KEY` | observabilidade (no cluster) |
+
+O token de teste do Mercado Pago fica só no `.env` local, nunca versionado.
+`scripts/mercado-pago-sandbox.ts` cria, consulta, busca e estorna orders de teste, e
+`scripts/assinar-notificacao-mercado-pago.ts` gera um `x-signature` válido para simular o webhook.
 
 ## Testes e qualidade ✱
 
@@ -165,26 +178,29 @@ npm run lint:check
 npm run sonar:up && npm run sonar:scan   # SonarQube local com quality gate
 ```
 
-O cenário BDD fica em [`test/bdd/features/aprovacao-orcamento.feature`](test/bdd/features/aprovacao-orcamento.feature)
-(aprovação, rejeição, orçamento já cancelado, cliente de outra OS e comando duplicado); os steps
-estão em `test/bdd/steps/`. Os testes de integração ficam em `test/integracao/`.
+Os cenários BDD (11) ficam em duas features:
+[`aprovacao-orcamento.feature`](test/bdd/features/aprovacao-orcamento.feature) (aprovação,
+rejeição, orçamento já cancelado, cliente de outra OS e comando duplicado) e
+[`pagamento.feature`](test/bdd/features/pagamento.feature) (pagamento confirmado, notificação
+repetida, pagamento pendente, pagamento depois do cancelamento, estorno que falha e é retentado,
+valor divergente). Os steps estão em `test/bdd/steps/` e usam o gateway simulado, sem chamar o
+Mercado Pago. Os testes de integração ficam em `test/integracao/`.
 
-**Cobertura** — medida localmente com `npm run test:cov` (41 suítes, 331 testes, todos verdes):
+**Cobertura** — medida localmente com `npm run test:cov` (52 suítes, 463 testes, todos verdes):
 
 | Métrica | Cobertura | Cobertos / total |
 | --- | --- | --- |
-| Statements | 99,89% | 947 / 948 |
-| Branches | 90,54% | 383 / 423 |
-| Functions | 100% | 212 / 212 |
-| Lines | 100% | 793 / 793 |
+| Statements | 99,6% | 1261 / 1266 |
+| Branches | 89,66% | 564 / 629 |
+| Functions | 99,23% | 258 / 260 |
+| Lines | 99,81% | 1061 / 1063 |
 
 ![Relatório de cobertura](docs/evidencias/cobertura.png)
 
 **Quality gate.** O job `Qualidade (SonarQube)` do CI sobe um SonarQube, aplica o gate "Cobertura
-80" e reprova o PR se a cobertura ficar abaixo de 80% (branches incluídas). O último run verde do
-CI do PR que levou esta versão à `develop` (lint, build, testes unitários e BDD, integração,
-contratos sincronizados e o job do quality gate) está em
-[actions/runs/41743757368](https://github.com/FIAP-POS-TECH-SOFTWARE-ARCHITECTURE/tc-oficina-billing-service/actions/runs/41743757368).
+80" e reprova o PR se a cobertura ficar abaixo de 80% (branches incluídas). Os runs do CI (lint,
+build, testes unitários e BDD, integração, contratos sincronizados e o job do quality gate) ficam
+em [actions/workflows/ci.yml](https://github.com/FIAP-POS-TECH-SOFTWARE-ARCHITECTURE/tc-oficina-billing-service/actions/workflows/ci.yml).
 
 ## Deploy ✱
 
@@ -207,7 +223,8 @@ HPA de 1 a 4 réplicas por CPU (70%) — mesma estratégia do restante da soluç
 `mensageria/eventos-topic-arn`, `mensageria/billing-comandos-url` e `billing/dynamodb-table`. O
 CD escreve `billing-service-lb-hostname` para o gateway. O `terraform apply` da infraestrutura é
 manual, em `tc-oficina-infra-k8s` e `tc-oficina-infra-db`; este pipeline faz só o deploy da
-aplicação.
+aplicação. O CD ainda não leva as credenciais do Mercado Pago para o Secret: até isso entrar, o
+serviço no cluster sobe com o gateway simulado (log `billing.pagamento.gateway-simulado`).
 
 ## API ✱
 
@@ -216,10 +233,11 @@ Swagger: `/billing/docs` (JSON em `/billing/docs-json`) — pelo gateway,
 <http://localhost:3000/billing/docs> (`npm run start:dev`). O gateway repassa `/billing/*` a este
 serviço sem reescrever o caminho. As rotas estão na tabela da seção [Comunicação](#comunicação-).
 
-**Collection:** ainda não há collection Bruno/Postman para as rotas do billing; a do restante da
-solução está em
-[`tc-oficina-os-service/bruno`](https://github.com/FIAP-POS-TECH-SOFTWARE-ARCHITECTURE/tc-oficina-os-service/tree/main/bruno)
-e não cobre `/billing`.
+**Collection:** [`bruno/Oficina-Billing`](bruno/Oficina-Billing) (Bruno) e o export
+[`bruno/oficina-billing.postman_collection.json`](bruno/oficina-billing.postman_collection.json)
+(Postman v2.1), com o fluxo completo: login, consulta, aprovação, rejeição, reconciliação e a
+notificação do webhook assinada. A do restante da solução está em
+[`tc-oficina-os-service/bruno`](https://github.com/FIAP-POS-TECH-SOFTWARE-ARCHITECTURE/tc-oficina-os-service/tree/main/bruno).
 
 ## Links ✱
 

@@ -10,6 +10,7 @@ O billing-service cuida do **orçamento** da ordem de serviço e do **pagamento*
 | Expõe ao cliente a consulta, a aprovação e a rejeição do orçamento | Guardar cliente, veículo ou catálogo como fonte de verdade (recebe uma cópia no comando) |
 | Cria a cobrança de pagamento quando o cliente aprova e devolve o `linkPagamento` | Executar diagnóstico ou reparo (execution-service) |
 | Cancela o orçamento e estorna o pagamento quando o orquestrador compensa | Publicar evento sem antes gravá-lo junto do efeito (outbox, seção 7) |
+| Recebe a notificação de pagamento do Mercado Pago (webhook assinado), confirma na API e publica `PagamentoConfirmado` | |
 | Publica o resultado de cada comando como evento (`OrcamentoGerado`, `OrcamentoCancelado`, `PagamentoEstornado` etc.) | |
 
 Rotas, filas e mensagens completas estão em [`contratos/README.md`](../contratos/README.md).
@@ -23,6 +24,7 @@ flowchart LR
     subgraph entrada["Adapters de entrada"]
         ctrlCli["OrcamentosClienteController<br/>/billing/cliente/orcamentos"]
         ctrlStaff["OrcamentosController<br/>/billing/orcamentos"]
+        ctrlWh["WebhookMercadoPagoController<br/>/billing/webhooks/mercado-pago"]
         cons["ConsumidorComandosBilling<br/>fila billing-comandos"]
     end
 
@@ -33,6 +35,10 @@ flowchart LR
         ucCancelar["CancelarOrcamento"]
         ucEstornar["EstornarPagamento"]
         ucConsulta["Consultar e Listar"]
+        ucNotif["ProcessarNotificacaoPagamento"]
+        ucReconc["ReconciliarPagamentos"]
+        ucRegistrar["RegistrarPagamento"]
+        ucRetentar["RetentarEstornos"]
         svcEventos["EventosOrcamentoService<br/>grava efeito + eventos e publica"]
         svcEstorno["EstornoService"]
     end
@@ -49,35 +55,48 @@ flowchart LR
 
     subgraph saida["Adapters de saída"]
         aDdb["OrcamentosDynamoDbGateway"]
-        aSim["GatewayPagamentoSimulado<br/>adapter atual"]
-        aMp["Adapter Mercado Pago<br/>adapter-alvo da mesma porta"]
+        aMp["MercadoPagoGateway<br/>com MERCADO_PAGO_ACCESS_TOKEN"]
+        aSim["GatewayPagamentoSimulado<br/>sem token: local e testes"]
         aSns["SnsSqsPublicador"]
         job["RepublicacaoEventosJob<br/>a cada 15 s"]
+        jobEst["RetentativaEstornosJob<br/>a cada 60 s"]
     end
 
     ctrlCli --> ucAprovar & ucRejeitar & ucConsulta
-    ctrlStaff --> ucConsulta
+    ctrlStaff --> ucConsulta & ucReconc
+    ctrlWh --> ucNotif
     cons --> ucGerar & ucCancelar & ucEstornar
-    ucGerar & ucAprovar & ucRejeitar & ucCancelar --> svcEventos
-    ucEstornar --> svcEstorno --> svcEventos
-    ucGerar & ucAprovar & ucRejeitar & ucCancelar & ucEstornar --> orc
-    ucAprovar --> pPag
+    ucNotif & ucReconc --> ucRegistrar
+    ucGerar & ucAprovar & ucRejeitar & ucCancelar & ucRegistrar --> svcEventos
+    ucEstornar & ucRetentar --> svcEstorno --> svcEventos
+    ucGerar & ucAprovar & ucRejeitar & ucCancelar & ucEstornar & ucRegistrar --> orc
+    ucAprovar & ucNotif & ucReconc & ucRegistrar --> pPag
     svcEstorno --> pPag
-    ucGerar & ucAprovar & ucCancelar & ucEstornar & ucConsulta --> pOrc
+    ucGerar & ucAprovar & ucCancelar & ucEstornar & ucConsulta & ucReconc & ucRegistrar & ucRetentar --> pOrc
     svcEventos --> pOrc & pPub
     pOrc -.-> aDdb
-    pPag -.-> aSim
     pPag -.-> aMp
+    pPag -.-> aSim
     pPub -.-> aSns
     job --> svcEventos
+    jobEst --> ucRetentar
     aDdb --> ddb[("DynamoDB<br/>oficina-billing-env")]
     aSns --> sns{{"SNS oficina-env-eventos"}}
     aMp --> mp(["Mercado Pago"])
 ```
 
-Ligação das portas (`orcamentos.module.ts:38-39`): `ORCAMENTOS_GATEWAY` → `OrcamentosDynamoDbGateway` e `GATEWAY_PAGAMENTO` → `GatewayPagamentoSimulado`.
+Ligação das portas (`orcamentos.module.ts:58-59`): `ORCAMENTOS_GATEWAY` → `OrcamentosDynamoDbGateway` e `GATEWAY_PAGAMENTO` → `criarGatewayPagamento()` (`orcamentos.module.ts:31-35`), que devolve o `MercadoPagoGateway` quando há `MERCADO_PAGO_ACCESS_TOKEN` e, sem ele, o `GatewayPagamentoSimulado` com o aviso `billing.pagamento.gateway-simulado` no log.
 
-**Situação do pagamento.** O adapter de pagamento em uso hoje é o `GatewayPagamentoSimulado` (`gateway-pagamento.simulado.ts`): devolve um link `https://pagamento.simulado.local/checkout/<orcamentoId>`, guarda pagamentos e estornos em memória e não movimenta dinheiro. O **Mercado Pago (Checkout Pro) é o adapter-alvo da mesma `GatewayPagamentoPort`**, decisão registrada na [ADR 013](https://github.com/FIAP-POS-TECH-SOFTWARE-ARCHITECTURE/tc-oficina-os-service/blob/main/docs/arquitetura/adrs/adr-013-pagamento-antes-do-reparo-mercado-pago.md): trocá-lo não altera use cases nem domínio, só a classe ligada ao token `GATEWAY_PAGAMENTO`. A porta já declara as quatro operações que esse adapter precisa: `criarCobranca`, `consultarPagamento`, `buscarPagamentosPorOrcamento` e `estornar(pagamentoId, chaveIdempotencia)` (`gateway-pagamento.port.ts:51-57`).
+**Pagamento.** O adapter real é o `MercadoPagoGateway` (`adapters/gateways/mercado-pago/`), sobre o SDK oficial `mercadopago` e a **API de Orders do Checkout Pro**, decisão registrada na [ADR 013](https://github.com/FIAP-POS-TECH-SOFTWARE-ARCHITECTURE/tc-oficina-os-service/blob/main/docs/arquitetura/adrs/adr-013-pagamento-antes-do-reparo-mercado-pago.md). Ele implementa as quatro operações da porta (`gateway-pagamento.port.ts:51-57`):
+
+| Operação | No Mercado Pago |
+| --- | --- |
+| `criarCobranca` | `orders.create` com `external_reference = orcamentoId`, os itens do orçamento, `expiration_time` igual ao prazo de pagamento da orquestração e chave de idempotência `order-<orcamentoId>`; devolve o `checkout_url` como `linkPagamento`. Uma nova tentativa com a mesma chave reaproveita a order já criada. |
+| `consultarPagamento` | `orders.get` pelo id da order |
+| `buscarPagamentosPorOrcamento` | `orders.search` por `external_reference` nos últimos 28 dias (usada pela reconciliação) |
+| `estornar` | `orders.refund` com a chave de idempotência recebida |
+
+O `GatewayPagamentoSimulado` (`gateway-pagamento.simulado.ts`) continua atrás da mesma porta: devolve um link `https://pagamento.simulado.local/checkout/<orcamentoId>`, guarda pagamentos e estornos em memória e não movimenta dinheiro. Ele atende o ambiente local sem conta e os testes BDD. Trocar um pelo outro não altera use cases nem domínio.
 
 ## 3. Rotas
 
@@ -90,10 +109,12 @@ Todas passam pelo API Gateway com o prefixo `/billing` (o gateway não reescreve
 | `POST /billing/cliente/orcamentos/:numeroOs/rejeitar` | cliente dono da OS | rejeitar: `422` fora de `AGUARDANDO_APROVACAO` |
 | `GET /billing/orcamentos/:numeroOs` | `ATENDENTE`, `ADMINISTRADOR` | consultar |
 | `GET /billing/orcamentos?status=` | `ATENDENTE`, `ADMINISTRADOR` | listar por status |
+| `POST /billing/orcamentos/:numeroOs/reconciliar` | `ATENDENTE`, `ADMINISTRADOR` | reconciliar pagamentos (seção 8) |
+| `POST /billing/webhooks/mercado-pago` | Mercado Pago, pública com `x-signature` | processar notificação de pagamento (seção 8) |
 | `GET /health` | pública, sem prefixo | probe do Kubernetes |
 | `GET /health/ready` | pública, sem prefixo | readiness (consulta o DynamoDB) |
 
-Origem no código: `orcamentos-cliente.controller.ts` (`@Controller("billing/cliente/orcamentos")`, linhas 18, 26, 33 e 41), `orcamentos.controller.ts` (`@Controller("billing/orcamentos")`, linhas 14, 21 e 28).
+Origem no código: `orcamentos-cliente.controller.ts` (`@Controller("billing/cliente/orcamentos")`, linhas 18, 26, 33 e 41), `orcamentos.controller.ts` (`@Controller("billing/orcamentos")`, linhas 17, 25, 32 e 39), `webhook-mercado-pago.controller.ts` (`@Controller("billing/webhooks")`, linhas 29 e 36).
 
 ## 4. Máquina de estados do orçamento
 
@@ -121,7 +142,7 @@ Observações, todas conferidas no código:
 - **Estado inicial.** `Orcamento.criar` cria o orçamento em `AGUARDANDO_APROVACAO` com `versao = 1` (`orcamento.entity.ts:100`).
 - **`CANCELADO → PAGO`.** Um pagamento que chega depois do cancelamento é registrado (campo `pagamentoAtrasado = true`, `orcamento.entity.ts:236-243`); o orquestrador então manda `EstornarPagamento`.
 - **Cancelar depois de pago.** Se o orçamento já tem pagamento (`PAGO`, `ESTORNO_PENDENTE`, `ESTORNADO`), `CancelarOrcamento` não muda o status: o status reflete o dinheiro, e só registra `canceladoEm` e o motivo (`registrarCancelamentoSemMudarStatus`, `orcamento.entity.ts:225-233`). Em `REJEITADO` ou `CANCELADO` o comando só reemite o evento `OrcamentoCancelado`.
-- **Transições sem ponto de entrada ainda.** `confirmar_pagamento` e `registrar_falha_estorno` existem no domínio (com testes unitários em `orcamento.entity.spec.ts`), mas nenhum use case as chama hoje: elas dependem do webhook e do adapter do Mercado Pago (seção 8) e do reagendamento de estorno (seção 9). Por isso `PagamentoConfirmado` e `EstornoFalhou` constam do catálogo de eventos do contrato, mas nenhum código de produção os emite ainda.
+- **Quem dispara cada transição de pagamento.** `confirmar_pagamento` vem do `RegistrarPagamentoUseCase`, chamado pelo webhook e pela reconciliação (seção 8); `registrar_falha_estorno` e o `estornar` a partir de `ESTORNO_PENDENTE` vêm do `EstornoService`, chamado pelo comando `EstornarPagamento` e pela retentativa agendada (seção 9).
 
 ## 5. Modelo de dados: tabela única no DynamoDB
 
@@ -167,7 +188,7 @@ Contrato completo (envelope, atributos, catálogo, regras de idempotência e sch
 | Sentido | Canal | Mensagens |
 | --- | --- | --- |
 | Consome | fila `oficina-<env>-billing-comandos` (DLQ `-dlq`) | `GerarOrcamento`, `CancelarOrcamento`, `EstornarPagamento` (`consumidor-comandos-billing.ts:31-40`) |
-| Produz | tópico SNS `oficina-<env>-eventos`, `origem: billing` | `OrcamentoGerado`, `FalhaGerarOrcamento`, `OrcamentoAprovado`, `OrcamentoRejeitado`, `OrcamentoCancelado`, `PagamentoEstornado` (emitidos hoje); `PagamentoConfirmado`, `EstornoFalhou` (tipos declarados em `eventos-billing.ts:9-12`, sem emissor ainda) |
+| Produz | tópico SNS `oficina-<env>-eventos`, `origem: billing` | `OrcamentoGerado`, `FalhaGerarOrcamento`, `OrcamentoAprovado`, `OrcamentoRejeitado`, `OrcamentoCancelado`, `PagamentoConfirmado` (webhook e reconciliação), `PagamentoEstornado`, `EstornoFalhou` (falha do estorno no provedor) |
 
 Comportamento do consumidor (`consumidor-sqs.ts`): long polling de 20 s, lote de até 10, validação do envelope contra os schemas do contrato e **exclusão da mensagem só depois** de o use case terminar sem erro (linha 101). Mensagem fora do contrato ou erro de processamento não apagam: a mensagem volta após o visibility timeout e, na quinta entrega, vai para a DLQ.
 
@@ -177,7 +198,7 @@ Respostas de cada comando:
 | --- | --- |
 | `GerarOrcamento` | `OrcamentoGerado`; `FalhaGerarOrcamento{motivo:"VALOR_TOTAL_INCONSISTENTE"}` se o total não bate; `FalhaGerarOrcamento{motivo:"ORCAMENTO_ENCERRADO"}` se já houve orçamento da OS e ele não está mais ativo; `OrcamentoCancelado{orcamentoId:null}` se o fluxo já tinha sido cancelado |
 | `CancelarOrcamento` | `OrcamentoCancelado` (com `orcamentoId:null` quando o orçamento ainda não existe) |
-| `EstornarPagamento` | `PagamentoEstornado` (com `pagamentoId:null` e `valorCentavos:0` quando não há pagamento a estornar) |
+| `EstornarPagamento` | `PagamentoEstornado` (com `pagamentoId:null` e `valorCentavos:0` quando não há pagamento a estornar); `EstornoFalhou{proximaTentativaEm}` se o provedor falhar |
 
 ## 7. Idempotência e publicação confiável (outbox)
 
@@ -187,13 +208,17 @@ Respostas de cada comando:
 
 ## 8. Webhook de pagamento
 
-O contrato prevê `POST /billing/webhooks/mercado-pago` (pública, validada por `x-signature`): `200` para assinatura válida (inclusive notificação duplicada ou de tipo ignorado), `401` para assinatura inválida e `503` em falha temporária, para o provedor reenviar. O API Gateway já roteia essa rota e o `app.setup.ts` já a isenta do rate limit (`ROTAS_SEM_LIMITE`, linha 15).
+`POST /billing/webhooks/mercado-pago` (`webhook-mercado-pago.controller.ts`) é pública e responde `200` para assinatura válida (inclusive notificação duplicada ou de tipo ignorado), `401` para assinatura inválida e `503` em falha temporária, para o provedor reenviar. O API Gateway roteia essa rota sem authorizer e o `app.setup.ts` a isenta do rate limit (`ROTAS_SEM_LIMITE`, linha 15).
 
-O que existe hoje no serviço:
+Caminho de uma notificação:
 
-- **Persistência pronta para a idempotência do webhook.** `EfeitosGravacao.notificacaoProcessada` grava um item `WEBHOOK#<pagamentoId>#<status>` com `attribute_not_exists(pk)` na mesma transação do efeito (`orcamentos.dynamodb.gateway.ts:233-240`); notificação repetida vira `MensagemJaProcessadaError`, e `notificacaoJaProcessada` consulta a chave. Os pagamentos conhecidos entram como itens `PAGAMENTO#` na mesma transação.
-- **Porta de consulta ao provedor.** `consultarPagamento` e `buscarPagamentosPorOrcamento` já existem na `GatewayPagamentoPort`, para a notificação ser confirmada junto ao provedor e para a reconciliação por `external_reference`.
-- **Ainda não existe** o controller do webhook (nem a validação de `x-signature`), a rota de reconciliação, a chamada a `confirmarPagamento` e a emissão de `PagamentoConfirmado`. Eles chegam com o adapter do Mercado Pago, o adapter-alvo decidido na [ADR 013](https://github.com/FIAP-POS-TECH-SOFTWARE-ARCHITECTURE/tc-oficina-os-service/blob/main/docs/arquitetura/adrs/adr-013-pagamento-antes-do-reparo-mercado-pago.md).
+1. **Assinatura.** `validarAssinaturaMercadoPago` (`webhook/assinatura-mercado-pago.ts`) monta o manifesto `id:<data.id>;request-id:<x-request-id>;ts:<ts>;`, calcula o HMAC SHA-256 com `MERCADO_PAGO_WEBHOOK_SECRET` e compara com o `v1` do `x-signature` em tempo constante. Recusa também `ts` fora da tolerância de 1 hora. Falha gera `401` e o log `billing.webhook.assinatura-invalida` com o motivo.
+2. **Tipo.** Só notificações de order (`type` `order` ou `orders_v2`) seguem; as demais respondem `200` com `processado: false`.
+3. **Consulta.** `ProcessarNotificacaoPagamentoUseCase` ignora o corpo e consulta a order na API do Mercado Pago (`consultarPagamento`): o estado que vale é o do provedor, nunca o da notificação.
+4. **Registro.** `RegistrarPagamentoUseCase` aplica as regras: pagamento não aprovado não muda nada (`NAO_APROVADO`); pagamento já registrado ou notificação já vista responde `JA_REGISTRADO`; um segundo pagamento do mesmo orçamento, valor diferente do orçamento ou orçamento em estado que não aceita pagamento são **estornados na hora**, sem passar pelo orquestrador; nos demais casos o orçamento vai a `PAGO` e `PagamentoConfirmado` entra na outbox, junto do item `WEBHOOK#<pagamentoId>#<status>` e do `PAGAMENTO#`, na mesma transação. Pagamento de orçamento já `CANCELADO` é confirmado com `pagamentoAtrasado = true`, e o orquestrador responde com `EstornarPagamento`.
+5. **Falha temporária.** Conflito de versão ou erro temporário do provedor viram `503`, e o Mercado Pago reenvia.
+
+**Reconciliação.** Quando uma notificação se perde, `POST /billing/orcamentos/:numeroOs/reconciliar` (staff) busca no Mercado Pago as orders do orçamento por `external_reference` e passa cada uma pelo mesmo `RegistrarPagamentoUseCase`. É idempotente: rodar de novo devolve `JA_REGISTRADO` para o que já foi confirmado.
 
 ## 9. Estorno e retentativa
 
@@ -201,11 +226,13 @@ O que existe hoje no serviço:
 
 1. Mensagem já processada: sai sem efeito.
 2. Orçamento sem pagamento ou já `ESTORNADO`: responde `PagamentoEstornado` imediatamente (com `pagamentoId: null` e valor `0` quando nunca houve pagamento), para o orquestrador não ficar preso compensando.
-3. Caso normal: `EstornoService.estornar` chama `GatewayPagamentoPort.estornar(pagamentoId, "estorno-<orcamentoId>")`. A **chave de idempotência** faz o provedor devolver o mesmo estorno se a chamada se repetir (o adapter simulado reproduz esse comportamento, `gateway-pagamento.simulado.ts:40-41`). Em seguida o orçamento vai a `ESTORNADO` e `PagamentoEstornado` entra na outbox, tudo numa transação (`estorno.service.ts:18-27`).
+3. Caso normal: `EstornoService.estornar` chama `GatewayPagamentoPort.estornar(pagamentoId, "estorno-<orcamentoId>")`. A **chave de idempotência** faz o provedor devolver o mesmo estorno se a chamada se repetir (o adapter simulado reproduz esse comportamento, `gateway-pagamento.simulado.ts:40-41`). Em seguida o orçamento vai a `ESTORNADO` e `PagamentoEstornado` entra na outbox, tudo numa transação (`estorno.service.ts:23-46`).
 
-Se o provedor falha, o erro sobe, a mensagem **não é apagada** e o SQS a reentrega depois do visibility timeout de 60 s; na quinta entrega ela vai para a DLQ `oficina-<env>-billing-comandos-dlq`. Além disso, o orquestrador reenvia a compensação sem resposta a cada prazo, com `messageId` novo, até três vezes, e depois marca o fluxo como falha técnica (ver [sequência de compensação](https://github.com/FIAP-POS-TECH-SOFTWARE-ARCHITECTURE/tc-oficina-os-service/blob/main/docs/arquitetura/sequencia-compensacao.md)).
+**Falha do provedor** (`estorno.service.ts:56-87`). Antes de registrar a falha, o serviço consulta o pagamento: se ele já está `refunded` no Mercado Pago (reembolso pelo painel, por outra chave ou `409` de order já reembolsada), o estorno conta como feito. Caso contrário o orçamento vai a `ESTORNO_PENDENTE`, com `tentativasEstorno`, `proximaTentativaEstornoEm` e `ultimoErroEstorno` (`orcamento.entity.ts:249-255`), e `EstornoFalhou{proximaTentativaEm}` entra na outbox na mesma transação. O `messageId` do comando é gravado junto, então o comando não volta para a fila e uma reentrega não duplica o evento.
 
-O domínio já modela o estado `ESTORNO_PENDENTE`, com `tentativasEstorno`, `proximaTentativaEstornoEm` e `ultimoErroEstorno` (`orcamento.entity.ts:249-255`), e o contrato define o evento `EstornoFalhou{proximaTentativaEm}`. A retentativa agendada pelo próprio billing e a emissão desse evento ainda não estão ligadas: hoje a retentativa é a do SQS e a do orquestrador, descritas acima.
+**Retentativa.** O `RetentativaEstornosJob` roda a cada 60 s (respeita `WORKERS_HABILITADOS` e não reentra) e o `RetentarEstornosUseCase` tenta de novo os orçamentos em `ESTORNO_PENDENTE` com a próxima tentativa vencida. O intervalo cresce a cada falha: 1, 5, 15 e 60 minutos (`BACKOFF_ESTORNO_MINUTOS`); da quinta falha em diante continua de hora em hora com o log de erro `billing.estorno.esgotado`, para alguém olhar. Quando uma retentativa dá certo, sai `PagamentoEstornado`. Do lado do orquestrador, `EstornoFalhou` adia o prazo da compensação em vez de reenviar o comando (ver [sequência de compensação](https://github.com/FIAP-POS-TECH-SOFTWARE-ARCHITECTURE/tc-oficina-os-service/blob/main/docs/arquitetura/sequencia-compensacao.md)).
+
+Erro que não vem do provedor (DynamoDB fora, por exemplo) continua subindo: a mensagem não é apagada, o SQS a reentrega depois do visibility timeout de 60 s e, na quinta entrega, ela vai para a DLQ `oficina-<env>-billing-comandos-dlq`.
 
 ## 10. Papel no fluxo da OS
 
@@ -215,8 +242,8 @@ O fluxo da OS é coordenado por uma **Saga orquestrada** (Saga Pattern): um orqu
 | --- | --- | --- | --- |
 | Gerar orçamento | `GerarOrcamento` | cria o orçamento em `AGUARDANDO_APROVACAO` | `OrcamentoGerado` / `FalhaGerarOrcamento` |
 | Compensar: desfazer o orçamento | `CancelarOrcamento` | `AGUARDANDO_APROVACAO` ou `APROVADO` → `CANCELADO` | `OrcamentoCancelado` |
-| Compensar: devolver o dinheiro | `EstornarPagamento` | `PAGO` → `ESTORNADO` (sem pagamento registrado, só reemite `PagamentoEstornado` com `pagamentoId` nulo) | `PagamentoEstornado` / `EstornoFalhou` (este último ainda não emitido) |
+| Compensar: devolver o dinheiro | `EstornarPagamento` | `PAGO` → `ESTORNADO` (sem pagamento registrado, só reemite `PagamentoEstornado` com `pagamentoId` nulo) | `PagamentoEstornado` / `EstornoFalhou` |
 
-A aprovação e a rejeição acontecem por HTTP, pelo cliente, e viram os eventos `OrcamentoAprovado` e `OrcamentoRejeitado`, que o orquestrador consome para avançar. O pagamento é o último passo antes do reparo (contramedida de *visão pessimista*: o reparo só começa com o dinheiro já confirmado).
+A aprovação e a rejeição acontecem por HTTP, pelo cliente, e viram os eventos `OrcamentoAprovado` e `OrcamentoRejeitado`, que o orquestrador consome para avançar. O pagamento chega pelo webhook do Mercado Pago e vira `PagamentoConfirmado`, que libera o reparo. O pagamento é o último passo antes do reparo (contramedida de *visão pessimista*: o reparo só começa com o dinheiro já confirmado).
 
 Para o conjunto da solução, ver no os-service a [visão geral](https://github.com/FIAP-POS-TECH-SOFTWARE-ARCHITECTURE/tc-oficina-os-service/blob/main/docs/arquitetura/visao-geral-microsservicos.md), a [sequência do fluxo da OS](https://github.com/FIAP-POS-TECH-SOFTWARE-ARCHITECTURE/tc-oficina-os-service/blob/main/docs/arquitetura/sequencia-fluxo-os.md), a [sequência de compensação](https://github.com/FIAP-POS-TECH-SOFTWARE-ARCHITECTURE/tc-oficina-os-service/blob/main/docs/arquitetura/sequencia-compensacao.md) e a [ADR 008 (Saga orquestrada)](https://github.com/FIAP-POS-TECH-SOFTWARE-ARCHITECTURE/tc-oficina-os-service/blob/main/docs/arquitetura/adrs/adr-008-saga-orquestrada.md).
