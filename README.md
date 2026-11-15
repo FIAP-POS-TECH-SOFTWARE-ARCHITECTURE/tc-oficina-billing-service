@@ -202,6 +202,10 @@ Mercado Pago. Os testes de integração ficam em `test/integracao/`.
 build, testes unitários e BDD, integração, contratos sincronizados e o job do quality gate) ficam
 em [actions/workflows/ci.yml](https://github.com/FIAP-POS-TECH-SOFTWARE-ARCHITECTURE/tc-oficina-billing-service/actions/workflows/ci.yml).
 
+Análise no SonarQube com o mesmo script e o mesmo gate (`npm run sonar:scan`): quality gate aprovado, cobertura geral de 96,0% (o Sonar combina linhas e condições num número só, por isso difere da tabela acima).
+
+![Quality gate aprovado no SonarQube](docs/evidencias/sonar.png)
+
 ## Deploy ✱
 
 | Workflow | Gatilho | O que faz |
