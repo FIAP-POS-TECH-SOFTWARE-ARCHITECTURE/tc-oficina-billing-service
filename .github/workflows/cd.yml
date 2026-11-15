@@ -64,11 +64,19 @@ jobs:
           SNS_EVENTOS_ARN=$(ler "/oficina/$ENV/mensageria/eventos-topic-arn")
           SQS_BILLING_COMANDOS_URL=$(ler "/oficina/$ENV/mensageria/billing-comandos-url")
           DYNAMODB_TABLE=$(ler "/oficina/$ENV/billing/dynamodb-table")
+          # Token e segredo do webhook são obrigatórios no cluster: sem eles o serviço subiria com o gateway simulado.
+          MP_TOKEN=$(ler "/oficina/$ENV/mercado-pago/access-token")
+          MP_SEGREDO=$(ler "/oficina/$ENV/mercado-pago/webhook-secret")
+          # notification-url é opcional: sem ele a order sai sem callback_url e vale só o webhook do painel.
+          URL_NOTIFICACAO=$(ler "/oficina/$ENV/mercado-pago/notification-url" 2>/dev/null || true)
           kubectl create secret generic billing-service-secrets -n "$ENV" \
             --from-literal=JWT_SECRET="$JWT_SECRET" \
             --from-literal=SNS_EVENTOS_ARN="$SNS_EVENTOS_ARN" \
             --from-literal=SQS_BILLING_COMANDOS_URL="$SQS_BILLING_COMANDOS_URL" \
             --from-literal=DYNAMODB_TABLE="$DYNAMODB_TABLE" \
+            --from-literal=MERCADO_PAGO_ACCESS_TOKEN="$MP_TOKEN" \
+            --from-literal=MERCADO_PAGO_WEBHOOK_SECRET="$MP_SEGREDO" \
+            --from-literal=MERCADO_PAGO_NOTIFICATION_URL="$URL_NOTIFICACAO" \
             --from-literal=NEW_RELIC_LICENSE_KEY="${{ secrets.NEW_RELIC_LICENSE_KEY }}" \
             --dry-run=client -o yaml | kubectl apply -n "$ENV" -f -
 
