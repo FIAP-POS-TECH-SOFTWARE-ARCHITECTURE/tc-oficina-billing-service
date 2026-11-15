@@ -6,6 +6,7 @@ import { criarClientesMercadoPago } from "./adapters/gateways/mercado-pago/clien
 import { MercadoPagoGateway } from "./adapters/gateways/mercado-pago/mercado-pago.gateway";
 import { OrcamentosDynamoDbGateway } from "./adapters/gateways/orcamentos.dynamodb.gateway";
 import { RepublicacaoEventosJob } from "./adapters/jobs/republicacao-eventos.job";
+import { RetentativaEstornosJob } from "./adapters/jobs/retentativa-estornos.job";
 import { OrcamentosClienteController } from "./adapters/orcamentos-cliente.controller";
 import { OrcamentosController } from "./adapters/orcamentos.controller";
 import { WebhookMercadoPagoController } from "./adapters/webhook-mercado-pago.controller";
@@ -21,8 +22,10 @@ import { EstornarPagamentoUseCase } from "./application/use-cases/estornar-pagam
 import { GerarOrcamentoUseCase } from "./application/use-cases/gerar-orcamento.use-case";
 import { ListarOrcamentosUseCase } from "./application/use-cases/listar-orcamentos.use-case";
 import { ProcessarNotificacaoPagamentoUseCase } from "./application/use-cases/processar-notificacao-pagamento.use-case";
+import { ReconciliarPagamentosUseCase } from "./application/use-cases/reconciliar-pagamentos.use-case";
 import { RegistrarPagamentoUseCase } from "./application/use-cases/registrar-pagamento.use-case";
 import { RejeitarOrcamentoUseCase } from "./application/use-cases/rejeitar-orcamento.use-case";
+import { RetentarEstornosUseCase } from "./application/use-cases/retentar-estornos.use-case";
 
 /** Sem token (dev local, demo sem conta) a cobrança continua simulada; homolog/prod têm o token garantido pelo CD. */
 export function criarGatewayPagamento(token = process.env.MERCADO_PAGO_ACCESS_TOKEN): GatewayPagamentoPort {
@@ -47,8 +50,11 @@ export function criarGatewayPagamento(token = process.env.MERCADO_PAGO_ACCESS_TO
 		ListarOrcamentosUseCase,
 		RegistrarPagamentoUseCase,
 		ProcessarNotificacaoPagamentoUseCase,
+		RetentarEstornosUseCase,
+		ReconciliarPagamentosUseCase,
 		ConsumidorComandosBilling,
 		RepublicacaoEventosJob,
+		RetentativaEstornosJob,
 		{ provide: ORCAMENTOS_GATEWAY, useClass: OrcamentosDynamoDbGateway },
 		{ provide: GATEWAY_PAGAMENTO, useFactory: () => criarGatewayPagamento() },
 	],
