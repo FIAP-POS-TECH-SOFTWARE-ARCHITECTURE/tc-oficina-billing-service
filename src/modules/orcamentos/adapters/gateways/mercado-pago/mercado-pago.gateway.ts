@@ -89,7 +89,8 @@ export class MercadoPagoGateway implements GatewayPagamentoPort {
 					description: `Orçamento da OS ${dados.numeroOs}`.slice(0, 256),
 					total_amount: centavosParaDecimal(somaItens),
 					items: dados.itens.map((item) => ({
-						external_code: item.referenciaId,
+						// A API recusa external_code com mais de 30 caracteres (o id do catálogo é um UUID de 36).
+						external_code: item.referenciaId.slice(0, 30),
 						title: item.descricao.slice(0, 256),
 						quantity: item.quantidade,
 						unit_price: centavosParaDecimal(item.precoUnitarioCentavos),

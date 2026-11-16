@@ -83,6 +83,20 @@ describe("MercadoPagoGateway", () => {
 			});
 		});
 
+		it("corta o external_code dos itens em 30 caracteres (limite da API)", async () => {
+			mp.orders.create.mockResolvedValue({ id: "ORD01ABC", checkout_url: "https://mp/checkout" });
+			const uuid = "26c27cbb-c9fe-4c77-a2a5-947f4d4c3a7b";
+
+			await gateway.criarCobranca(
+				dados({
+					itens: [{ referenciaId: uuid, descricao: "Alinhamento", quantidade: 1, precoUnitarioCentavos: 10000 }],
+				}),
+			);
+
+			const [item] = mp.orders.create.mock.calls[0][0].body.items;
+			expect(item.external_code).toBe(uuid.slice(0, 30));
+		});
+
 		it("omite callback_url quando a variável está vazia", async () => {
 			process.env.MERCADO_PAGO_NOTIFICATION_URL = "";
 			mp.orders.create.mockResolvedValue({ id: "ORD01ABC", checkout_url: "https://mp/checkout" });
