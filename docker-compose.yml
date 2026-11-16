@@ -1,0 +1,36 @@
+services:
+  ministack:
+    image: ministackorg/ministack:1.5.17
+    container_name: oficina-billing-ministack
+    ports:
+      - "4566:4566"
+    environment:
+      MINISTACK_REGION: us-east-1
+
+  ministack-init:
+    image: amazon/aws-cli:2.27.41
+    entrypoint: ["/bin/sh", "/init/criar-recursos.sh"]
+    volumes:
+      - ./dev/ministack:/init:ro
+    environment:
+      AWS_ENDPOINT_URL: http://ministack:4566
+      AWS_REGION: us-east-1
+      AWS_ACCESS_KEY_ID: test
+      AWS_SECRET_ACCESS_KEY: test
+    depends_on:
+      - ministack
+
+  billing-service:
+    build: .
+    container_name: oficina-billing-service
+    ports:
+      - "3001:3000"
+    env_file: .env
+    environment:
+      # A imagem não traz pino-pretty (devDependency): o NODE_ENV do .env vale só para `npm run start:dev`.
+      NODE_ENV: production
+      AWS_ENDPOINT_URL: http://ministack:4566
+      SQS_BILLING_COMANDOS_URL: http://ministack:4566/000000000000/oficina-local-billing-comandos
+    depends_on:
+      ministack-init:
+        condition: service_completed_successfully

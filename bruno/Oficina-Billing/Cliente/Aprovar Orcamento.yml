@@ -1,0 +1,23 @@
+info:
+  name: Aprovar Orcamento
+  type: http
+  seq: 2
+
+http:
+  method: POST
+  url: "{{url}}/billing/cliente/orcamentos/{{osNumero}}/aprovar"
+  auth:
+    type: bearer
+    token: "{{clienteToken}}"
+
+runtime:
+  scripts:
+    - type: after-response
+      code: |-
+        if (res.body?.data?.linkPagamento) bru.setVar("linkPagamento", res.body.data.linkPagamento);
+
+settings:
+  encodeUrl: true
+  timeout: 0
+  followRedirects: true
+  maxRedirects: 5

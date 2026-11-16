@@ -1,0 +1,414 @@
+{
+  "info": {
+    "name": "Oficina-Billing",
+    "description": null,
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "auth": {
+    "type": "bearer",
+    "bearer": [
+      {
+        "key": "token",
+        "value": "{{token}}",
+        "type": "string"
+      }
+    ]
+  },
+  "item": [
+    {
+      "name": "Auth",
+      "item": [
+        {
+          "name": "Login Atendente (OS)",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "auth": {
+              "type": "noauth"
+            },
+            "description": "",
+            "url": {
+              "raw": "{{osUrl}}/auth/login",
+              "protocol": "",
+              "host": [
+                "{{osUrl}}"
+              ],
+              "path": [
+                "auth",
+                "login"
+              ],
+              "query": [],
+              "variable": []
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"atendente@oficina.local\",\n  \"senha\": \"Atendente@2024\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "packages": {},
+                "requests": {},
+                "exec": [
+                  "const corpo = pm.response.json();",
+                  "if (corpo && corpo.data && corpo.data.accessToken) pm.environment.set(\"token\", corpo.data.accessToken);"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Health",
+      "item": [
+        {
+          "name": "Health",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "auth": {
+              "type": "noauth"
+            },
+            "description": "",
+            "url": {
+              "raw": "{{url}}/health",
+              "protocol": "",
+              "host": [
+                "{{url}}"
+              ],
+              "path": [
+                "health"
+              ],
+              "query": [],
+              "variable": []
+            }
+          }
+        },
+        {
+          "name": "Health Ready",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "auth": {
+              "type": "noauth"
+            },
+            "description": "",
+            "url": {
+              "raw": "{{url}}/health/ready",
+              "protocol": "",
+              "host": [
+                "{{url}}"
+              ],
+              "path": [
+                "health",
+                "ready"
+              ],
+              "query": [],
+              "variable": []
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Cliente",
+      "item": [
+        {
+          "name": "Consultar Orcamento",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{clienteToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "description": "",
+            "url": {
+              "raw": "{{url}}/billing/cliente/orcamentos/{{osNumero}}",
+              "protocol": "",
+              "host": [
+                "{{url}}"
+              ],
+              "path": [
+                "billing",
+                "cliente",
+                "orcamentos",
+                "{{osNumero}}"
+              ],
+              "query": [],
+              "variable": []
+            }
+          }
+        },
+        {
+          "name": "Aprovar Orcamento",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{clienteToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "description": "",
+            "url": {
+              "raw": "{{url}}/billing/cliente/orcamentos/{{osNumero}}/aprovar",
+              "protocol": "",
+              "host": [
+                "{{url}}"
+              ],
+              "path": [
+                "billing",
+                "cliente",
+                "orcamentos",
+                "{{osNumero}}",
+                "aprovar"
+              ],
+              "query": [],
+              "variable": []
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "packages": {},
+                "requests": {},
+                "exec": [
+                  "const corpo = pm.response.json();",
+                  "if (corpo && corpo.data && corpo.data.linkPagamento) pm.variables.set(\"linkPagamento\", corpo.data.linkPagamento);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Rejeitar Orcamento",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{clienteToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "description": "",
+            "url": {
+              "raw": "{{url}}/billing/cliente/orcamentos/{{osNumero}}/rejeitar",
+              "protocol": "",
+              "host": [
+                "{{url}}"
+              ],
+              "path": [
+                "billing",
+                "cliente",
+                "orcamentos",
+                "{{osNumero}}",
+                "rejeitar"
+              ],
+              "query": [],
+              "variable": []
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"motivo\": \"Valor acima do esperado\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Oficina",
+      "item": [
+        {
+          "name": "Listar Orcamentos",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "description": "",
+            "url": {
+              "raw": "{{url}}/billing/orcamentos?status=AGUARDANDO_APROVACAO",
+              "protocol": "",
+              "host": [
+                "{{url}}"
+              ],
+              "path": [
+                "billing",
+                "orcamentos?status=AGUARDANDO_APROVACAO"
+              ],
+              "query": [],
+              "variable": []
+            }
+          }
+        },
+        {
+          "name": "Consultar Orcamento",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "description": "",
+            "url": {
+              "raw": "{{url}}/billing/orcamentos/{{osNumero}}",
+              "protocol": "",
+              "host": [
+                "{{url}}"
+              ],
+              "path": [
+                "billing",
+                "orcamentos",
+                "{{osNumero}}"
+              ],
+              "query": [],
+              "variable": []
+            }
+          }
+        },
+        {
+          "name": "Reconciliar Pagamentos",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "description": "",
+            "url": {
+              "raw": "{{url}}/billing/orcamentos/{{osNumero}}/reconciliar",
+              "protocol": "",
+              "host": [
+                "{{url}}"
+              ],
+              "path": [
+                "billing",
+                "orcamentos",
+                "{{osNumero}}",
+                "reconciliar"
+              ],
+              "query": [],
+              "variable": []
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Webhook",
+      "item": [
+        {
+          "name": "Notificacao Mercado Pago",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "auth": {
+              "type": "noauth"
+            },
+            "description": "",
+            "url": {
+              "raw": "{{url}}/billing/webhooks/mercado-pago?data.id={{orderId}}&type=order",
+              "protocol": "",
+              "host": [
+                "{{url}}"
+              ],
+              "path": [
+                "billing",
+                "webhooks",
+                "mercado-pago?data.id={{orderId}}&type=order"
+              ],
+              "query": [],
+              "variable": []
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{ \"type\": \"order\", \"action\": \"order.processed\", \"data\": { \"id\": \"{{orderId}}\" } }",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "packages": {},
+                "requests": {},
+                "exec": [
+                  "// Mesmo manifesto do Mercado Pago: id:<data.id em minúsculas>;request-id:<x-request-id>;ts:<ts em ms>;",
+                  "const segredo = pm.environment.get(\"webhookSecret\");",
+                  "const dataId = String(pm.environment.get(\"orderId\")).toLowerCase();",
+                  "const requestId = pm.variables.replaceIn(\"{{$guid}}\");",
+                  "const ts = String(Date.now());",
+                  "const v1 = CryptoJS.HmacSHA256(`id:${dataId};request-id:${requestId};ts:${ts};`, segredo).toString(CryptoJS.enc.Hex);",
+                  "pm.request.headers.upsert({ key: \"x-request-id\", value: requestId });",
+                  "pm.request.headers.upsert({ key: \"x-signature\", value: `ts=${ts},v1=${v1}` });"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "variable": [
+    {
+      "key": "url",
+      "value": "http://localhost:3001",
+      "type": "default"
+    },
+    {
+      "key": "osUrl",
+      "value": "",
+      "type": "default"
+    },
+    {
+      "key": "osNumero",
+      "value": "",
+      "type": "default"
+    },
+    {
+      "key": "clienteToken",
+      "value": "",
+      "type": "default"
+    },
+    {
+      "key": "orderId",
+      "value": "",
+      "type": "default"
+    },
+    {
+      "key": "token",
+      "value": "",
+      "type": "default"
+    }
+  ]
+}

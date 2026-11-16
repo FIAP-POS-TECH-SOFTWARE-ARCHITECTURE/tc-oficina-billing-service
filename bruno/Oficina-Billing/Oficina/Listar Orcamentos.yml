@@ -1,0 +1,15 @@
+info:
+  name: Listar Orcamentos
+  type: http
+  seq: 1
+
+http:
+  method: GET
+  url: "{{url}}/billing/orcamentos?status=AGUARDANDO_APROVACAO"
+  auth: inherit
+
+settings:
+  encodeUrl: true
+  timeout: 0
+  followRedirects: true
+  maxRedirects: 5

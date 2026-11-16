@@ -1,0 +1,10 @@
+node_modules
+dist
+coverage
+.git
+bruno
+dev
+test
+scripts
+k8s
+.env

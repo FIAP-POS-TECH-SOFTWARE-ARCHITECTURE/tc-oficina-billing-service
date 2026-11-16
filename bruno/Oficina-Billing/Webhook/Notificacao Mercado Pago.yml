@@ -1,0 +1,33 @@
+info:
+  name: Notificacao Mercado Pago
+  type: http
+  seq: 1
+
+http:
+  method: POST
+  url: "{{url}}/billing/webhooks/mercado-pago?data.id={{orderId}}&type=order"
+  body:
+    type: json
+    data: |-
+      { "type": "order", "action": "order.processed", "data": { "id": "{{orderId}}" } }
+  auth: none
+
+runtime:
+  scripts:
+    - type: before-request
+      code: |-
+        // Mesmo manifesto do Mercado Pago: id:<data.id em minúsculas>;request-id:<x-request-id>;ts:<ts em ms>;
+        // crypto-js e uuid vêm com o Bruno e funcionam no modo seguro do sandbox (o "crypto" do Node não).
+        const CryptoJS = require("crypto-js");
+        const { v4: uuid } = require("uuid");
+        const segredo = bru.getEnvVar("webhookSecret");
+        const dataId = String(bru.getEnvVar("orderId")).toLowerCase();
+        const requestId = uuid();
+        const ts = String(Date.now());
+        const v1 = CryptoJS.HmacSHA256(`id:${dataId};request-id:${requestId};ts:${ts};`, segredo).toString(CryptoJS.enc.Hex);
+        req.setHeader("x-request-id", requestId);
+        req.setHeader("x-signature", `ts=${ts},v1=${v1}`);
+
+settings:
+  encodeUrl: false
+  timeout: 0
